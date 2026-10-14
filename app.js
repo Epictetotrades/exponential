@@ -4,6 +4,16 @@
    teléfono al instante y se suben a tu repositorio privado de GitHub cuando hay señal.
    Formato de los registros: igual que en el artefacto anterior (wNN = {e: {"d3:remo": {...}}}). */
 
+/* ── versión: súbela en cada publicación (y la etiqueta vX.Y en git) ── */
+const VERSIONES = [
+  {n: "1.4", nombre: "Versiones", fecha: "14 oct 2026", txt: "Nombre de versión visible en Más y este historial."},
+  {n: "1.3", nombre: "Compacta", fecha: "14 oct 2026", txt: "Más ejercicios por pantalla; la app se actualiza al abrirla con señal."},
+  {n: "1.2", nombre: "Clave fácil", fecha: "14 oct 2026", txt: "Enlace a GitHub con la clave ya rellena; registros sin reps visibles."},
+  {n: "1.1", nombre: "Revisión", fecha: "14 oct 2026", txt: "Correcciones de sincronización, progresión y RPE del plan."},
+  {n: "1.0", nombre: "Inicio", fecha: "14 oct 2026", txt: "App instalable: 52 semanas, registro y sincronización con tu cuenta."},
+];
+const VERSION = VERSIONES[0];
+
 /* ── utilidades ── */
 const $ = (s, r = document) => r.querySelector(s);
 const esc = t => String(t ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
@@ -522,6 +532,7 @@ function header() {
   } else if (ui.tab === "ano") {
     title = "Tu año"; sub = `Vas en la semana ${st.actual}. Toca una semana para abrirla.`;
   } else {
+    eb = `Exponential · v${VERSION.n} ${VERSION.nombre}`;
     title = {bloques: "Bloques del año", volumen: "Volumen por músculo", reglas: "Reglas y herramientas", datos: "Tus datos"}[ui.mas];
     sub = {bloques: "Qué hace cada bloque y de qué página sale.", volumen: "Series por músculo, semana a semana.", reglas: "Checklist, calculadoras y las reglas del plan.", datos: "Dónde se guarda tu registro."}[ui.mas];
     extra = `<div class="seg" role="group" aria-label="Secciones">${[["bloques", "Bloques"], ["volumen", "Volumen"], ["reglas", "Reglas"], ["datos", "Datos"]].map(([id, n]) => `<button data-mas="${id}" aria-pressed="${ui.mas === id}">${n}</button>`).join("")}</div>`;
@@ -811,7 +822,9 @@ function masDatos() {
     </div>`;
 }
 function renderMas() {
-  const body = {bloques: masBloques, volumen: masVolumen, reglas: masReglas, datos: masDatos}[ui.mas]();
+  let body = {bloques: masBloques, volumen: masVolumen, reglas: masReglas, datos: masDatos}[ui.mas]();
+  if (ui.mas === "datos") body += `<h2>Versión ${VERSION.n} · ${esc(VERSION.nombre)}</h2>
+    <div class="list">${VERSIONES.map(v => `<div class="row"><span class="k">V${v.n} · ${esc(v.nombre.toUpperCase())} · ${esc(v.fecha.toUpperCase())}</span><p class="small" style="margin:3px 0 0;color:var(--tx2)">${esc(v.txt)}</p></div>`).join("")}</div>`;
   $("#v-mas").innerHTML = body;
   if (ui.mas === "reglas") { actualizarChecklist(); actualizarCalc(); actualizarPeso(); }
 }
