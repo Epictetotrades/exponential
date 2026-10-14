@@ -1,7 +1,7 @@
 /* Guarda la app en el teléfono para que abra sin señal.
-   La app y el plan se sirven desde la caché y se actualizan en segundo plano;
-   las llamadas a GitHub (tus registros) nunca pasan por la caché. */
-const CACHE = "exponential-v1";
+   Con señal, siempre pide la versión más nueva y la guarda; sin señal, usa la guardada.
+   Las llamadas a GitHub (tus registros) nunca pasan por la caché. */
+const CACHE = "exponential-v2";
 const SHELL = ["./", "index.html", "styles.css", "app.js", "data/plan.json", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png"];
 
@@ -20,9 +20,12 @@ self.addEventListener("fetch", e => {
   const fuentes = url.hostname === "fonts.googleapis.com" || url.hostname === "fonts.gstatic.com";
   if (!propio && !fuentes) return;
   e.respondWith(caches.open(CACHE).then(async c => {
-    const enCache = await c.match(e.request, {ignoreSearch: propio});
-    const red = fetch(e.request).then(r => { if (r && (r.ok || r.type === "opaque")) c.put(e.request, r.clone()); return r; }).catch(() => null);
-    if (enCache) { e.waitUntil(red); return enCache; }
-    return (await red) || new Response("Sin conexión", {status: 503});
+    try {
+      const r = await fetch(e.request, {cache: "no-cache"});
+      if (r && (r.ok || r.type === "opaque")) c.put(e.request, r.clone());
+      return r;
+    } catch (err) {
+      return (await c.match(e.request, {ignoreSearch: propio})) || new Response("Sin conexión", {status: 503});
+    }
   }));
 });

@@ -488,11 +488,11 @@ function weekNav() {
   return `<div class="wk">
     <button class="circ" data-step="-1" aria-label="Semana anterior" ${s.w === 1 ? "disabled" : ""}>${ICON.back}</button>
     <div class="wk-mid">
-      <div class="wk-lbl"><span>Semana ${s.w}</span><span class="mut">de 52</span></div>
+      <div class="wk-lbl"><span>Semana ${s.w}</span>${s.w !== st.actual ? `<button class="link-btn" data-today>Ir a la S${st.actual}</button>` : '<span class="mut">de 52</span>'}</div>
       <div class="wk-bar"><i style="width:${(s.w / 52 * 100).toFixed(1)}%"></i></div>
     </div>
     <button class="circ" data-step="1" aria-label="Semana siguiente" ${s.w === 52 ? "disabled" : ""}>${ICON.next}</button>
-  </div>${s.w !== st.actual ? `<button class="link-btn" data-today>Volver a la semana ${st.actual}</button>` : ""}`;
+  </div>`;
 }
 function itemsEj(d) { return d.items.filter(it => ["main", "acc", "single", "amrap"].includes(it.k)); }
 function dayNav(s) {
@@ -557,7 +557,7 @@ function itemRow(s, d, it) {
       if (est) {
         const actual = rmDe(s.w, lift), v = r05(est);
         fb = `<div class="feedback">Tu registro estima un máximo de ≈ ${kg(v)} (usas ${kg(actual)}).${Math.abs(v - actual) / actual >= 0.02 ? ` <button class="link-btn" data-setrm="${lift}" data-v="${v}" data-w="${s.w}">Usar ${kg(v)} como máximo</button>` : ""}</div>`;
-      } else fb = `<div class="feedback">Anota el RPE de alguna serie para estimar tu máximo.</div>`;
+      } else fb = `<div class="hint">Anota el RPE de alguna serie para estimar tu máximo.</div>`;
     }
     if (it.k === "acc" && PROG[h.id] && PROG[h.id].w === s.w) fb = `<div class="feedback">Próxima vez en ${esc(h.n)}: <b class="mono">${kg(PROG[h.id].next)}</b> · ${esc(PROG[h.id].motivo)}.</div>`;
   }
@@ -568,7 +568,7 @@ function itemRow(s, d, it) {
       <div class="grid2"><span class="k">PLAN</span><span class="v">${esc(planTxt(s, it))}</span>${hecho}</div>
       ${prev && prev.com ? `<span class="quote">“${esc(prev.com)}”</span>` : ""}
     </button>
-    ${fb ? `<div style="margin-top:10px">${fb}</div>` : ""}
+    ${fb ? `<div style="margin-top:6px">${fb}</div>` : ""}
     ${det.length ? `<details class="more"><summary>Detalles</summary><div>${det.map(esc).join("<br>")}</div></details>` : ""}
   </div>`;
 }
@@ -794,10 +794,12 @@ function masDatos() {
   return `
     <div class="panel" style="margin-top:16px">
       <p><b>Ahora tu registro se guarda solo en este teléfono.</b> Conéctalo a tu cuenta para no perderlo y para que Claude pueda revisarlo.</p>
+      <a class="btn pri" href="${esc(enlaceClave())}" target="_blank" rel="noopener" style="display:flex;align-items:center;justify-content:center;text-decoration:none;margin:14px 0">Crear la clave en GitHub</a>
       <ol class="small" style="padding-left:18px;color:var(--tx2);line-height:1.6;margin:0">
-        <li>Abre <a href="${esc(enlaceClave())}" target="_blank" rel="noopener">este enlace a GitHub</a>. Ya viene con el nombre, 1 año de duración y el permiso de guardar.</li>
-        <li>En «Repository access» elige <b>Only select repositories</b>, marca <b>${esc(cfg.repo)}</b> y pulsa «Generate token».</li>
-        <li>Copia la clave y pégala aquí abajo.</li>
+        <li>Toca el botón de arriba. Se abre GitHub con todo relleno.</li>
+        <li>En «Repository access» toca <b>Only select repositories</b> y elige <b>${esc(cfg.repo)}</b>.</li>
+        <li>Abajo del todo, toca <b>Generate token</b> y copia el código.</li>
+        <li>Vuelve aquí, pégalo en «Clave de acceso» y toca <b>Conectar</b>.</li>
       </ol>
     </div>
     <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
