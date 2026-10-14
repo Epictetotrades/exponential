@@ -404,7 +404,7 @@ function aplicarProgresion(w, it, entry, key) {
 }
 function resumen(sets) {
   if (!sets || !sets.length) return "";
-  const uno = x => (x.kg ? f(x.kg) + " × " : "") + x.reps + (x.kg ? "" : " reps");
+  const uno = x => (x.kg ? f(x.kg) + " × " : "") + (x.reps ?? "?") + (x.kg ? "" : " reps");
   const iguales = sets.every(x => x.kg === sets[0].kg && x.reps === sets[0].reps);
   const rpes = sets.map(x => x.rpe).filter(x => x != null);
   const base = iguales ? `${uno(sets[0])} · ${sets.length} ${sets.length === 1 ? "serie" : "series"}` : sets.map(uno).join(" · ");
