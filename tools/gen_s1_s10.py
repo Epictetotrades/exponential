@@ -65,11 +65,11 @@ nuevas = []
 # S1 intro = S45 tal cual (ya es ¾ de las series de S46 con un punto menos de RPE)
 nuevas.append(semana(45, 1, "Intro", "", "Semana intro: ¾ de las series y un punto menos de RPE. Entras al volumen sin el dolor muscular que frenaría las semanas siguientes (p.104–105).", tipo="acc", k=0))
 
-# S2 volumen 1: cargas y reps de S45 con las series y el RPE de una semana normal de volumen (S46)
+# S2 volumen 1 = semana 1 del bloque de acumulación del libro: pesado 80 % × 6 (p.269) y
+# volumen 65 % × 10 (p.268), con las series y el RPE de una semana normal de volumen (S46).
 s2 = semana(46, 2, "Volumen", "1 de 3", NOTA_VOL, tipo="acc", k=1)
-cargas_s45 = {(d["id"], it["slot"]): (it["pct"], it["reps"]) for d, it in mains(W[45])}
 for d, it in mains(s2):
-    it["pct"], it["reps"] = cargas_s45[(d["id"], it["slot"])]
+    it["pct"], it["reps"] = (80.0, 6) if d["id"] in ("d1", "d2", "d3") else (65.0, 10)
 nuevas.append(s2)
 
 nuevas.append(semana(46, 3, "Volumen", "2 de 3", NOTA_VOL, tipo="acc", k=2))
@@ -88,6 +88,32 @@ nuevas.append(s9)
 
 nuevas.append(semana(31, 10, "Test", "", W[31]["nota"].replace("antes de la semana siguiente", "antes de la S11")))
 
+# ── corrección contra el libro en todo el año ──
+# En los bloques de intensificación, el día de volumen va a RPE 6–8 (p.266–267, p.270–272);
+# el plan decía 7–8. La tabla de p.64 da 6,5 con esas cargas, dentro de 6–8.
+todas = nuevas + [s for s in D["semanas"] if s["w"] > 10]
+corregidas = []
+for s in todas:
+    if s.get("tipo") != "int":
+        continue
+    for d, it in mains(s):
+        if d["id"] in ("d5", "d6") and it["rpe"] == "7–8":
+            it["rpe"] = "6–8"
+            corregidas.append(f"S{s['w']} {d['id']}")
+print("RPE del día de volumen 7–8 → 6–8 (p.266–267, p.270–272):", ", ".join(corregidas))
+
+# En el taper se mantienen cargas y reps y se queda un poco más lejos del fallo (p.136): el día de
+# volumen no puede pedir más RPE (7–9) que la intensificación que viene antes (6–8).
+corregidas = []
+for s in todas:
+    if s.get("tipo") not in ("taper", "taper1"):
+        continue
+    for d, it in mains(s):
+        if d["id"] in ("d5", "d6") and it["rpe"] == "7–9":
+            it["rpe"] = "6–8"
+            corregidas.append(f"S{s['w']} {d['id']}")
+print("RPE del día de volumen en el taper 7–9 → 6–8 (p.136):", ", ".join(corregidas))
+
 # ── comprobaciones ──
 print("Máximos usados:", RM)
 print(f"{'S':>3} {'día':4} {'básico':12} {'series×reps':>11} {'%':>6} {'kg':>7} {'reps máx p.64':>13} {'RPE esp.':>8}  rango plan")
@@ -99,7 +125,7 @@ for s in nuevas:
         rm = reps_max(it["pct"])
         rpe = 10 - (rm - it["reps"])
         lo, hi = [float(x) for x in str(it["rpe"]).split("–")]
-        ok = lo - 0.5 <= rpe <= hi + 0.5
+        ok = lo <= rpe <= hi  # sin margen: la tabla de p.64 tiene que caer dentro del rango
         if not ok:
             problemas.append(f"S{s['w']} {d['id']} {it['n']}: RPE esperado {rpe:.1f} fuera de {it['rpe']}")
         it["rpe_esp"] = round(rpe * 2) / 2
@@ -117,7 +143,7 @@ if problemas:
     print("\n".join(problemas))
 
 out = copy.deepcopy(D)
-out["semanas"] = nuevas + [s for s in D["semanas"] if s["w"] > 10]
+out["semanas"] = todas
 assert [s["w"] for s in out["semanas"]] == list(range(1, 53))
 json.dump(out, open(dst, "w", encoding="utf8"), ensure_ascii=False, separators=(",", ":"))
 print(f"\nEscrito {dst}: {len(out['semanas'])} semanas")

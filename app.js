@@ -75,7 +75,12 @@ const ALT = {
 const STORE = "exp-app-v1", CFG = "exp-cfg-v1";
 let st = {actual: 13, rm: [{}, {}, {}, {}, {}], jalon: "", peso: ""};
 let LOG = {}, PROG = {};
+/* Cada cambio pendiente guarda una marca única: si llega otro cambio mientras se sube el anterior,
+   la marca cambia y el pendiente no se borra al terminar la subida. */
 let dirty = {estado: false, prog: false, weeks: {}};
+let progBorrados = [];
+let seq = Date.now();
+const marca = () => ++seq;
 let cfg = {owner: "Epictetotrades", repo: "exponential-datos", token: ""};
 let lastSync = null;
 const ui = {tab: "hoy", week: 13, day: 0, mas: "bloques", dayTouched: false};
@@ -88,6 +93,7 @@ function readStore() {
     if (s) {
       st = Object.assign(st, s.st || {}); LOG = s.LOG || {}; PROG = s.PROG || {};
       dirty = Object.assign({estado: false, prog: false, weeks: {}}, s.dirty || {});
+      progBorrados = s.progBorrados || [];
       lastSync = s.lastSync || null;
       if (s.ui) { ui.week = s.ui.week || st.actual; ui.mas = s.ui.mas || "bloques"; }
     }
@@ -98,7 +104,7 @@ function readStore() {
 }
 function saveStore() {
   try {
-    localStorage.setItem(STORE, JSON.stringify({st, LOG, PROG, dirty, lastSync, ui: {week: ui.week, mas: ui.mas}}));
+    localStorage.setItem(STORE, JSON.stringify({st, LOG, PROG, dirty, progBorrados, lastSync, ui: {week: ui.week, mas: ui.mas}}));
     return true;
   } catch (e) { return false; }
 }
@@ -113,7 +119,12 @@ function setSync(s, msg) {
   b.dataset.s = s;
   $("#sync-txt").textContent = {local: "Local", ok: "Al día", saving: "Guardando", offline: "Sin señal", error: "Revisar"}[s] || s;
   b.title = msg || "";
-  if (ui.tab === "mas" && ui.mas === "datos" && !sheet) renderMas();
+  if (ui.tab === "mas" && ui.mas === "datos" && !sheet && !editando()) renderMas();
+}
+/* No se vuelve a dibujar la pantalla mientras escribes: perderías el foco o lo que llevas escrito. */
+function editando() {
+  const a = document.activeElement;
+  return !!a && ["INPUT", "TEXTAREA", "SELECT"].includes(a.tagName);
 }
 function b64enc(str) {
   const bytes = new TextEncoder().encode(str);
@@ -139,7 +150,9 @@ function gh(url, opt = {}) {
 const contentsUrl = p => `https://api.github.com/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/contents/${p}`;
 async function httpErr(r) {
   let m = ""; try { m = (await r.json()).message || ""; } catch (e) {}
-  const e = new Error(`GitHub respondió ${r.status}${m ? ": " + m : ""}`);
+  const pista = r.status === 401 ? " La clave no es válida o venció: crea otra en Más › Datos."
+    : r.status === 403 ? " La clave no tiene permiso: en GitHub, «Contents» debe estar en «Read and write»." : "";
+  const e = new Error(`GitHub respondió ${r.status}${m ? ": " + m : ""}.${pista}`);
   e.status = r.status; return e;
 }
 async function getFile(path) {
@@ -178,24 +191,29 @@ async function flush() {
   setSync("saving", "Guardando…");
   try {
     if (dirty.estado) {
+      const v = dirty.estado;
       const r = await getFile("estado.json");
       await putFile("estado.json", {rm: st.rm, jalon: st.jalon, actual: st.actual, peso: st.peso || ""}, r.sha);
-      dirty.estado = false;
+      if (dirty.estado === v) dirty.estado = false;
     }
     if (dirty.prog) {
+      const v = dirty.prog, borrados = progBorrados.slice();
       const r = await getFile("prog.json");
       PROG = Object.assign({}, (r.data && r.data.ex) || {}, PROG);
+      borrados.forEach(id => delete PROG[id]);
       await putFile("prog.json", {ex: PROG, v: 2}, r.sha);
-      dirty.prog = false;
+      progBorrados = progBorrados.filter(id => !borrados.includes(id));
+      if (dirty.prog === v) dirty.prog = false;
     }
     for (const w of Object.keys(dirty.weeks)) {
+      const v = dirty.weeks[w];
       for (let intento = 0; ; intento++) {
         const r = await getFile(weekPath(w));
         LOG[w] = mezclar(LOG[w], r.data ? migrar(+w, r.data.e || {}) : {});
         try { await putFile(weekPath(w), {e: LOG[w], v: 2}, r.sha); break; }
         catch (e) { if (!e.conflict || intento >= 2) throw e; }
       }
-      delete dirty.weeks[w];
+      if (dirty.weeks[w] === v) delete dirty.weeks[w];
     }
     lastSync = Date.now();
     saveStore();
@@ -214,7 +232,7 @@ async function cargarSemana(w, forzar) {
     if (r.data) {
       LOG[w] = mezclar(LOG[w], migrar(w, r.data.e || {}));
       saveStore();
-      if (!sheet && (ui.week === w || ui.tab === "semana")) render();
+      if (!sheet && !editando() && ui.week === w && (ui.tab === "hoy" || ui.tab === "semana")) render();
     }
   } catch (e) { loaded[w] = false; }
 }
@@ -232,12 +250,15 @@ async function pull() {
       if (v.peso != null) st.peso = v.peso;
     }
     const p = await getFile("prog.json");
-    if (p.data) PROG = dirty.prog ? Object.assign({}, p.data.ex || {}, PROG) : (p.data.ex || {});
+    if (p.data) {
+      PROG = dirty.prog ? Object.assign({}, p.data.ex || {}, PROG) : (p.data.ex || {});
+      progBorrados.forEach(id => delete PROG[id]);
+    }
     const semanas = [...new Set([st.actual, ui.week, st.actual - 1].filter(w => w >= 1 && w <= 52))];
     await Promise.all(semanas.map(w => cargarSemana(w, true)));
     saveStore();
     if (!ui.dayTouched) { ui.week = st.actual; autoDia(); }
-    if (!sheet) render();
+    if (!sheet && !editando()) render();
     if (pendientes()) await flush(); else setSync("ok", "Al día con tu cuenta");
   } catch (err) {
     if (errorDeRed(err)) setSync("offline", "Sin señal: usando lo guardado en el teléfono");
@@ -251,10 +272,14 @@ async function conectar(owner, repo, token) {
   if (r.status === 401) throw new Error("La clave no es válida o ya venció.");
   if (r.status === 404) throw new Error("No encuentro ese repositorio con esa clave. Revisa que la clave tenga acceso a él.");
   if (!r.ok) throw new Error("GitHub respondió " + r.status);
+  const antes = cfg;
   cfg = {owner, repo, token};
+  try { await getFile("estado.json"); }  // comprueba que la clave puede leer el contenido, no solo ver el repo
+  catch (e) { cfg = antes; throw e; }
   saveCfg();
   Object.keys(loaded).forEach(k => delete loaded[k]);
   await pull();
+  if (syncState === "error") throw new Error($("#sync").title || "No pude sincronizar.");
 }
 
 /* ── números (tabla de p.64) ── */
@@ -292,7 +317,7 @@ function descanso(it) {
 }
 
 /* ── registros ── */
-const slug = t => String(t).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+const slug = t => String(t).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
 const idItem = it => it.slot || it.ex || slug(it.n);
 const claveDe = (did, it) => did + ":" + idItem(it);
 const nombrePlan = it => it.n.replace(/ \((pesado|volumen)\)$/, "").replace(/ · .*$/, "");
@@ -348,7 +373,8 @@ function cargaSugerida(s, it, hid) {
 }
 function aplicarProgresion(w, it, entry, key) {
   const s = W[w - 1];
-  if (it.k !== "acc" || NOPROG.includes(s.tipo) || !entry.sets.length) return;
+  const intro = !s.viejo && s.tipo === "acc" && s.k === 0;  // la intro va liviana a propósito (p.104–105)
+  if (it.k !== "acc" || NOPROG.includes(s.tipo) || intro || !entry.sets.length) return;
   const [lo, hi] = rango(it.reps), rpeMax = it.rpe ? rango(it.rpe)[1] : 10;
   const carga = Math.max(...entry.sets.map(x => x.kg));
   if (!carga) return;
@@ -356,13 +382,25 @@ function aplicarProgresion(w, it, entry, key) {
   const repsTope = entry.sets.every(x => x.reps >= hi);
   const tope = repsTope && entry.sets.every(x => x.rpe == null || x.rpe <= rpeMax);
   const bajo = entry.sets.some(x => x.reps < lo);
-  const next = tope ? carga + inc : bajo ? Math.max(0, carga - inc) : carga;
-  const motivo = tope ? `llegaste al tope de ${hi} reps en todas las series`
-    : bajo ? `quedaste bajo ${lo} reps en alguna serie`
-    : repsTope ? `llegaste a ${hi} reps, pero con RPE sobre ${f(rpeMax)}: repite la carga`
-    : `aún no llegas a ${hi} reps en todas`;
+  const sobre = entry.sets.every(x => x.reps >= hi + 2);  // muy por encima del rango: la carga quedó liviana
+  let next, motivo;
+  if (sobre) {
+    // Carga que deja el tope del rango al RPE máximo, según la tabla de p.64. Sobre ~5 reps la
+    // estimación pierde precisión (p.115, p.120), así que el salto se limita a +10 %.
+    const est = entry.sets.filter(x => x.kg > 0 && x.rpe != null).map(x => x.kg * 100 / pctDeReps(x.reps + 10 - x.rpe));
+    const objetivo = est.length ? Math.min(...est) * pctDeReps(hi + 10 - rpeMax) / 100 : carga + 2 * inc;
+    next = Math.round(Math.max(carga + inc, Math.min(objetivo, carga * 1.1)) / inc) * inc;
+    motivo = `pasaste el rango (${entry.sets.map(x => x.reps).join(", ")} reps para ${it.reps}): sube para volver al rango (tabla p.64)`;
+  } else {
+    next = tope ? carga + inc : bajo ? Math.max(0, carga - inc) : carga;
+    motivo = tope ? `llegaste al tope de ${hi} reps en todas las series`
+      : bajo ? `quedaste bajo ${lo} reps en alguna serie`
+      : repsTope ? `llegaste a ${hi} reps, pero con RPE sobre ${f(rpeMax)}: repite la carga`
+      : `aún no llegas a ${hi} reps en todas`;
+  }
   PROG[entry.hecho.id] = {w, reps: String(it.reps), kg: carga, next, motivo, n: entry.hecho.n, key};
-  dirty.prog = true;
+  progBorrados = progBorrados.filter(id => id !== entry.hecho.id);
+  dirty.prog = marca();
 }
 function resumen(sets) {
   if (!sets || !sets.length) return "";
@@ -390,10 +428,12 @@ function guardarEntrada(w, key, entry, it) {
   LOG[w] = LOG[w] || {};
   const prev = LOG[w][key];
   const idPrev = prev && prev.hecho && prev.hecho.id;
-  if (idPrev && idPrev !== (entry.hecho && entry.hecho.id) && PROG[idPrev] && PROG[idPrev].key === key && PROG[idPrev].w === w) { delete PROG[idPrev]; dirty.prog = true; }
+  if (idPrev && idPrev !== (entry.hecho && entry.hecho.id) && PROG[idPrev] && PROG[idPrev].key === key && PROG[idPrev].w === w) {
+    delete PROG[idPrev]; progBorrados.push(idPrev); dirty.prog = marca();
+  }
   LOG[w][key] = entry;
   if (it) aplicarProgresion(w, it, entry, key);
-  dirty.weeks[w] = true;
+  dirty.weeks[w] = marca();
   pedirGuardado(300);
 }
 
@@ -419,7 +459,9 @@ function detalleTxt(s, it) {
   const sub = [];
   if (it.k === "main") {
     const rm = rmDe(s.w, it.lift), carga = r25(rm * it.pct / 100);
-    sub.push(`${f(it.pct)} % de ${f(rm)}. Si la primera serie no cae en ese RPE, ajusta la carga (p.246).`);
+    sub.push(NOPROG.includes(s.tipo)
+      ? `${f(it.pct)} % de ${f(rm)}. Semana de ${s.tipo === "desc" ? "descarga" : s.tipo === "test" ? "test" : "taper"}: usa esta carga aunque se sienta fácil; no la subas para llegar al RPE (p.105, p.136, p.246).`
+      : `${f(it.pct)} % de ${f(rm)}. Si la primera serie no cae en ese RPE, ajusta la carga (p.246).`);
     if (it.ola_cond) sub.push(`Segunda ola: si la primera te quedó bajo el RPE, usa ${kg(carga + it.ola_cond)} (p.243).`);
   } else if (it.k === "single") {
     sub.push(`Sube por el 80 % y el 90 % de ${f(rmDe(s.w, it.lift))}; el último, a RPE 8–9, sin llegar al fallo (p.118). Anota carga y RPE y la app estima tu máximo.`);
@@ -917,7 +959,7 @@ function guardarExtraSheet() {
   const w = sheet.w, k = "x~" + sheet.did;
   LOG[w] = LOG[w] || {};
   LOG[w][k] = (LOG[w][k] || []).concat([{v: 2, n, id: "extra:" + slug(n), sets, t: Date.now()}]);
-  dirty.weeks[w] = true;
+  dirty.weeks[w] = marca();
   pedirGuardado(300);
   cerrarSheet();
   toast("Extra guardado.");
@@ -985,14 +1027,14 @@ document.addEventListener("click", async e => {
     if (!LOG[w] || !LOG[w][k]) return;
     const x = LOG[w][k].splice(i, 1)[0];
     if (x) LOG[w]._del = [...(LOG[w]._del || []), x.t];
-    dirty.weeks[w] = true; pedirGuardado(300); render(); return;
+    dirty.weeks[w] = marca(); pedirGuardado(300); render(); return;
   }
   if (ds.setrm) {
     const lift = ds.setrm, v = Number(ds.v), w = Number(ds.w);
     if (lift === "jalon") st.jalon = v; else { const i = tramo(w); st.rm[i] = st.rm[i] || {}; st.rm[i][lift] = v; }
-    dirty.estado = true; pedirGuardado(300); render(); toast(`Máximo actualizado: ${kg(v)}.`); return;
+    dirty.estado = marca(); pedirGuardado(300); render(); toast(`Máximo actualizado: ${kg(v)}.`); return;
   }
-  if (ds.actual) { st.actual = Number(ds.actual); dirty.estado = true; pedirGuardado(300); render(); toast(`La semana ${st.actual} es ahora la actual.`); return; }
+  if (ds.actual) { st.actual = Number(ds.actual); dirty.estado = marca(); pedirGuardado(300); render(); toast(`La semana ${st.actual} es ahora la actual.`); return; }
   if ("sheetClose" in ds) return cerrarSheet();
   if ("addSet" in ds) { const l = sheet.rows[sheet.rows.length - 1] || {kg: "", reps: "", rpe: ""}; sheet.rows.push({kg: l.kg, reps: l.reps, rpe: ""}); refrescarSets(); return; }
   if ("delSet" in ds) { if (sheet.rows.length > 1) { sheet.rows.pop(); refrescarSets(); } return; }
@@ -1028,12 +1070,12 @@ document.addEventListener("input", e => {
     const w = ui.week, did = t.dataset.dn;
     LOG[w] = LOG[w] || {};
     LOG[w]["n~" + did] = {txt: t.value.trim(), t: Date.now()};
-    dirty.weeks[w] = true;
+    dirty.weeks[w] = marca();
     clearTimeout(_deb.dn); _deb.dn = setTimeout(() => pedirGuardado(0), 800);
     return;
   }
   if (t.id === "c-kg" || t.id === "c-reps") actualizarCalc();
-  else if (t.id === "peso") { st.peso = t.value; dirty.estado = true; actualizarPeso(); clearTimeout(_deb.p); _deb.p = setTimeout(() => pedirGuardado(0), 900); }
+  else if (t.id === "peso") { st.peso = t.value; dirty.estado = marca(); actualizarPeso(); clearTimeout(_deb.p); _deb.p = setTimeout(() => pedirGuardado(0), 900); }
 });
 document.addEventListener("change", e => {
   const t = e.target;
@@ -1046,9 +1088,9 @@ document.addEventListener("change", e => {
   if (t.dataset.rm) {
     const i = Number(t.dataset.rm); st.rm[i] = st.rm[i] || {};
     st.rm[i][t.dataset.lift] = t.value.trim().replace(",", ".");
-    dirty.estado = true; pedirGuardado(300); renderAno(); return;
+    dirty.estado = marca(); pedirGuardado(300); renderAno(); return;
   }
-  if (t.dataset.jalon) { st.jalon = t.value.trim().replace(",", "."); dirty.estado = true; pedirGuardado(300); return; }
+  if (t.dataset.jalon) { st.jalon = t.value.trim().replace(",", "."); dirty.estado = marca(); pedirGuardado(300); return; }
   if ("ck" in t.dataset) actualizarChecklist();
   else if (t.id === "c-rpe") actualizarCalc();
 });
