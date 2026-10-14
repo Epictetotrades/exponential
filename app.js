@@ -770,6 +770,12 @@ function masReglas() {
       <li>Las cargas de referencia de accesorios suponen que trabajabas a RPE ~8.</li>
     </ul></div>`;
 }
+/* GitHub no deja crear claves por API (solo el dueño, desde la web), pero sí rellenar el formulario por enlace. */
+function enlaceClave() {
+  const q = new URLSearchParams({name: "exponential-app", description: "App Exponential: lee y guarda tus registros",
+    target_name: cfg.owner, expires_in: "366", contents: "write"});
+  return "https://github.com/settings/personal-access-tokens/new?" + q.toString();
+}
 function masDatos() {
   const hora = lastSync ? new Date(lastSync).toLocaleString("es", {dateStyle: "short", timeStyle: "short"}) : "nunca";
   const estado = {local: "Solo en este teléfono", ok: "Al día con tu cuenta", saving: "Guardando…", offline: "Sin señal: lo nuevo está en el teléfono y se sube al volver", error: "Hubo un problema"}[syncState];
@@ -789,11 +795,9 @@ function masDatos() {
     <div class="panel" style="margin-top:16px">
       <p><b>Ahora tu registro se guarda solo en este teléfono.</b> Conéctalo a tu cuenta para no perderlo y para que Claude pueda revisarlo.</p>
       <ol class="small" style="padding-left:18px;color:var(--tx2);line-height:1.6;margin:0">
-        <li>Abre <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">github.com/settings/personal-access-tokens/new</a>.</li>
-        <li>Nombre: <b>exponential-app</b>. Vencimiento: 1 año.</li>
-        <li>En «Repository access», elige <b>Only select repositories</b> y marca <b>${esc(cfg.repo)}</b>.</li>
-        <li>En «Permissions › Repository permissions», pon <b>Contents</b> en <b>Read and write</b>.</li>
-        <li>Pulsa «Generate token», cópialo y pégalo aquí abajo.</li>
+        <li>Abre <a href="${esc(enlaceClave())}" target="_blank" rel="noopener">este enlace a GitHub</a>. Ya viene con el nombre, 1 año de duración y el permiso de guardar.</li>
+        <li>En «Repository access» elige <b>Only select repositories</b>, marca <b>${esc(cfg.repo)}</b> y pulsa «Generate token».</li>
+        <li>Copia la clave y pégala aquí abajo.</li>
       </ol>
     </div>
     <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
