@@ -6,6 +6,7 @@
 
 /* ── versión: súbela en cada publicación (y la etiqueta vX.Y en git) ── */
 const VERSIONES = [
+  {n: "1.8", nombre: "Línea y temas", fecha: "15 oct 2026", txt: "Diseño nuevo: Hoy como línea con la serie en curso y una barra de descanso que guarda la serie; registro completo en foco; Semana como planilla; la cinta del año arriba; 5 temas con modo automático."},
   {n: "1.7", nombre: "Máximo fiable", fecha: "15 oct 2026", txt: "El máximo se estima solo con series de poco margen hasta el fallo: una descarga a RPE 6 ya no propone bajarlo, y un re-test a RPE 8–9 sí cuenta."},
   {n: "1.6", nombre: "Comentarios", fecha: "14 oct 2026", txt: "Comentarios de Claude dentro de la app; variantes del gimnasio completas; vuelve «Añadir serie»."},
   {n: "1.5", nombre: "Descanso y avance", fecha: "14 oct 2026", txt: "Temporizador de descanso con vibración y gráfico de tu máximo estimado por semana."},
@@ -28,6 +29,9 @@ const num = v => { const n = parseFloat(String(v ?? "").replace(",", ".")); retu
 const ICON = {
   back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>',
   next: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>',
+  ok: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg>',
+  ajustes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>',
 };
 
 /* ── constantes del plan ── */
@@ -98,7 +102,28 @@ let seq = Date.now();
 const marca = () => ++seq;
 let cfg = {owner: "Epictetotrades", repo: "exponential-datos", token: ""};
 let lastSync = null;
-const ui = {tab: "hoy", week: 13, day: 0, mas: "bloques", dayTouched: false, av: "banca", avPt: null};
+const ui = {tab: "hoy", week: 13, day: 0, mas: "bloques", dayTouched: false, av: "banca", avPt: null, abierto: undefined, dockCtl: false};
+
+/* ── tema: se guarda en este teléfono. «auto» sigue el modo claro u oscuro del sistema ── */
+const TEMAS = [
+  {id: "hueso", n: "Hueso y burdeos", tipo: "claro", bg: "#efebe3", tx: "#1d1b18", acc: "#6e2a2a", line: "#d3ccbe"},
+  {id: "grafito", n: "Grafito y latón", tipo: "oscuro", bg: "#111214", tx: "#eceae5", acc: "#b9a27a", line: "#2c2e33"},
+  {id: "papel", n: "Papel y tinta", tipo: "claro", bg: "#f4f1ea", tx: "#1b2130", acc: "#2f4a6d", line: "#d6d0c3"},
+  {id: "onix", n: "Ónix y plata", tipo: "oscuro", bg: "#0a0a0b", tx: "#ededee", acc: "#c7ccd4", line: "#2a2a2e"},
+  {id: "niebla", n: "Niebla y azul marino", tipo: "claro", bg: "#e7e8ea", tx: "#16191d", acc: "#1f3d5a", line: "#c6cad0"},
+];
+const TEMA_KEY = "exp-tema";
+let tema = {modo: "hueso", claro: "hueso", oscuro: "grafito"};
+try { tema = Object.assign(tema, JSON.parse(localStorage.getItem(TEMA_KEY) || "null") || {}); } catch (e) {}
+const oscuroSistema = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+const temaActivo = () => tema.modo === "auto" ? (oscuroSistema && oscuroSistema.matches ? tema.oscuro : tema.claro) : tema.modo;
+function aplicarTema() {
+  const t = TEMAS.find(x => x.id === temaActivo()) || TEMAS[0];
+  if (document.documentElement) document.documentElement.dataset.tema = t.id;
+  const m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = t.bg;
+}
+function guardarTema() { try { localStorage.setItem(TEMA_KEY, JSON.stringify(tema)); } catch (e) {} aplicarTema(); }
+if (oscuroSistema && oscuroSistema.addEventListener) oscuroSistema.addEventListener("change", () => { if (tema.modo === "auto") aplicarTema(); });
 const loaded = {};
 let sheet = null;
 
@@ -508,156 +533,221 @@ function detalleTxt(s, it) {
   return sub;
 }
 
-/* ── render: cabecera ── */
-function weekNav() {
-  const s = W[ui.week - 1];
-  return `<div class="wk">
-    <button class="circ" data-step="-1" aria-label="Semana anterior" ${s.w === 1 ? "disabled" : ""}>${ICON.back}</button>
-    <div class="wk-mid">
-      <div class="wk-lbl"><span>Semana ${s.w}</span>${s.w !== st.actual ? `<button class="link-btn" data-today>Ir a la S${st.actual}</button>` : '<span class="mut">de 52</span>'}</div>
-      <div class="wk-bar"><i style="width:${(s.w / 52 * 100).toFixed(1)}%"></i></div>
-    </div>
-    <button class="circ" data-step="1" aria-label="Semana siguiente" ${s.w === 52 ? "disabled" : ""}>${ICON.next}</button>
-  </div>`;
+/* ── render: cabecera (la cinta del año, igual en todas las pestañas) ── */
+function cintaHtml() {
+  return `<div class="cinta-b">${CICLOS.map(c => `<span class="cinta-g" style="flex:${c.w[1] - c.w[0] + 1}">${Array.from({length: c.w[1] - c.w[0] + 1}, (_, i) => {
+    const w = c.w[0] + i;
+    return `<i class="${w < st.actual ? "p" : w === st.actual ? "a" : ""}${w === ui.week && w !== st.actual ? " v" : ""}"></i>`;
+  }).join("")}</span>`).join("")}</div>
+  <div class="cinta-c">${CICLOS.map(c => `<span style="flex:${c.w[1] - c.w[0] + 1}">${c.id}</span>`).join("")}</div>`;
 }
+function header() {
+  $("#h-eyebrow").textContent = `Año 1 · semana ${st.actual} de 52`;
+  const c = $("#cinta"); if (!c) return;  // página vieja en caché: sin cinta, el resto funciona
+  c.innerHTML = cintaHtml();
+  c.setAttribute("aria-label", `El año en 52 semanas: vas en la ${st.actual}${ui.week !== st.actual ? ` y estás viendo la ${ui.week}` : ""}.`);
+}
+
+/* ── render: Hoy (el día como línea; el ejercicio en curso se registra ahí mismo) ── */
+const nSeries = it => it.k === "single" || it.k === "amrap" ? 1 : +it.sets || 1;
+const esBasico = it => ["main", "single", "amrap"].includes(it.k);
+const incKg = (it, n) => esBasico(it) ? 2.5 : /mancuerna|laterales|posteriores|pájaros/i.test(n || it.n) ? 2 : 2.5;
+const RPES = [6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10];
+const corto = n => /Potencia/.test(n) ? "Potencia" : n.split(" · ")[0];
 function itemsEj(d) { return d.items.filter(it => ["main", "acc", "single", "amrap"].includes(it.k)); }
+function serieTxt(x) {
+  const k = num(x.kg), r = x.reps === "" || x.reps == null ? "?" : x.reps;
+  return (k ? f(k) + " × " + r : r + " reps") + (x.rpe != null && x.rpe !== "" ? " · RPE " + f(+x.rpe) : "");
+}
 function dayNav(s) {
-  return `<nav class="days" aria-label="Días">${s.dias.map((d, i) => {
+  return `<nav class="dias" aria-label="Días">${s.dias.map((d, i) => {
     const ej = itemsEj(d), log = LOG[s.w] || {};
     const hechos = ej.filter(it => registrado(log[claveDe(d.id, it)])).length;
     const pct = ej.length ? Math.round(hechos / ej.length * 100) : 0;
-    return `<button class="day" data-day="${i}" aria-pressed="${i === ui.day}" aria-label="Día ${i + 1}: ${esc(d.n)}">D${i + 1}<i><b style="width:${pct}%"></b></i></button>`;
+    return `<button class="dia" data-day="${i}" aria-pressed="${i === ui.day}" aria-label="Día ${i + 1}: ${esc(d.n)}, ${hechos} de ${ej.length} ejercicios"><b>D${i + 1}</b><span>${esc(corto(d.n))}</span><i><u style="width:${pct}%"></u></i></button>`;
   }).join("")}</nav>`;
 }
-function header() {
-  const s = W[ui.week - 1];
-  let eb = "Exponential", title = "", sub = "", extra = "";
-  const wl = `S${s.w} · ${etiqueta(s)}${s.w === st.actual ? " · ahora" : ""}`;
-  if (ui.tab === "hoy") {
-    const d = s.dias[ui.day], ej = itemsEj(d), log = LOG[s.w] || {};
-    const regs = ej.map(it => log[claveDe(d.id, it)]).filter(registrado);
-    const series = regs.reduce((a, x) => a + (x.sets ? x.sets.length : 0), 0);
-    eb = wl; title = d.n;
-    sub = !ej.length ? "Sin ejercicios con series este día"
-      : esPlantilla(s.w) && !regs.length ? `Plantilla de la Pirámide · ${ej.length} ejercicios`
-      : s.w > st.actual && !regs.length ? `${ej.length} ejercicios por hacer`
-      : `${regs.length} de ${ej.length} ejercicios · ${series} series`;
-    extra = weekNav() + dayNav(s);
-  } else if (ui.tab === "semana") {
-    eb = wl; title = `Semana ${s.w}`; sub = `${ciclo(s).n} · ${etiqueta(s)}`; extra = weekNav();
-  } else if (ui.tab === "ano") {
-    title = "Tu año"; sub = `Vas en la semana ${st.actual}. Toca una semana para abrirla.`;
-  } else {
-    eb = `Exponential · v${VERSION.n} ${VERSION.nombre}`;
-    title = {bloques: "Bloques del año", volumen: "Volumen por músculo", reglas: "Reglas y herramientas", datos: "Tus datos"}[ui.mas];
-    sub = {bloques: "Qué hace cada bloque y de qué página sale.", volumen: "Series por músculo, semana a semana.", reglas: "Checklist, calculadoras y las reglas del plan.", datos: "Dónde se guarda tu registro."}[ui.mas];
-    extra = `<div class="seg" role="group" aria-label="Secciones">${[["bloques", "Bloques"], ["volumen", "Volumen"], ["reglas", "Reglas"], ["datos", "Datos"]].map(([id, n]) => `<button data-mas="${id}" aria-pressed="${ui.mas === id}">${n}</button>`).join("")}</div>`;
-  }
-  $("#h-eyebrow").textContent = eb;
-  $("#h-title").textContent = title;
-  $("#h-sub").textContent = sub;
-  $("#h-extra").innerHTML = extra;
+/* La serie en curso: qué ejercicio está abierto en Hoy y los números que llevas. */
+let edit = null;  // {w, key, idx, kg, reps, rpe}
+function nuevoEdit(w, key, idx) {
+  const s = W[w - 1], it = itemDeClave(w, key); if (!it) return null;
+  const prev = (LOG[w] || {})[key];
+  const sets = prev && prev.sets && !prev.omitido ? prev.sets : [];
+  const i = idx == null ? sets.length : Math.min(idx, sets.length);
+  const ref = sets[i] || sets[sets.length - 1];
+  return {w, key, idx: i,
+    kg: ref ? ref.kg : (cargaSugerida(s, it, hechoDe(prev, it).id) || ""),
+    reps: ref ? ref.reps : it.k === "single" ? 1 : it.k === "amrap" ? "" : rango(it.reps)[0],
+    rpe: sets[i] && sets[i].rpe != null ? sets[i].rpe : null};
 }
-
-/* ── render: Hoy ── */
-function itemRow(s, d, it) {
-  if (it.k === "nota") return `<div class="row nota"><b>${esc(it.n)}</b><span>${esc(it.txt)}</span></div>`;
-  if (it.k === "pot") return `<div class="row"><div class="ex-head"><div class="ex-name"><span class="tags"><span class="tag m">Potencia · descanso ${descanso(it)}</span></span><b>${esc(it.n)}</b></div></div>
-    <div class="grid2" style="margin-top:8px"><span class="k">PLAN</span><span class="v">${esc(planTxt(s, it))}</span></div>${it.txt ? `<p class="small mut" style="margin:6px 0 0 58px">${esc(it.txt)}</p>` : ""}</div>`;
-  const key = claveDe(d.id, it), prev = (LOG[s.w] || {})[key];
-  const [cls, txt] = estadoItem(s, it, prev);
-  const tags = [];
-  if (["main", "single", "amrap"].includes(it.k)) tags.push('<span class="tag">Básico</span>');
-  if (it.prio) tags.push('<span class="tag">Prioridad</span>');
-  tags.push(`<span class="tag m">Descanso ${descanso(it)}</span>`);
-  let hecho = "";
-  if (registrado(prev)) {
-    const h = hechoDe(prev, it);
-    hecho = prev.omitido ? `<span class="k">HECHO</span><span class="v">No lo hiciste</span>`
-      : `<span class="k">HECHO</span><span class="v strong">${h.id !== it.ex ? esc(h.n) + ": " : ""}${esc(resumen(prev.sets))}</span>`;
-  }
+function pendienteDelDia(s, d) {
+  const log = LOG[s.w] || {};
+  const it = itemsEj(d).find(it => { const p = log[claveDe(d.id, it)]; return !registrado(p) || (!p.omitido && p.sets.length < nSeries(it)); });
+  return it ? claveDe(d.id, it) : null;
+}
+const numTxt = v => typeof v === "number" ? f(v) : String(v ?? "");
+function stepper(fld, val) {
+  const lbl = fld === "kg" ? "Kilos" : "Reps";
+  return `<div class="stp"><span class="k">${fld === "kg" ? "KG" : "REPS"}</span><div class="stp-in">
+    <button data-stp="${fld}" data-d="-1" aria-label="Bajar ${lbl.toLowerCase()}">−</button>
+    <input class="num" data-ed="${fld}" type="text" inputmode="${fld === "kg" ? "decimal" : "numeric"}" enterkeyhint="${fld === "kg" ? "next" : "done"}" value="${esc(numTxt(val))}" placeholder="${fld === "kg" ? "kg" : "reps"}" aria-label="${lbl} de la serie">
+    <button data-stp="${fld}" data-d="1" aria-label="Subir ${lbl.toLowerCase()}">+</button></div></div>`;
+}
+function rpeHtml(v) {
+  const x = v === "" || v == null ? null : +v;
+  return `<div class="rpe"><span class="k">RPE</span><div class="rpe-g" role="group" aria-label="RPE de la serie">${RPES.map(r => `<button data-rpe="${r}" aria-pressed="${x === r}">${f(r)}</button>`).join("")}</div></div>`;
+}
+function feedbackHtml(s, d, it, prev) {
   let fb = "";
   if (registrado(prev) && !prev.omitido) {
     const h = hechoDe(prev, it);
-    if (h.id === it.ex && ["main", "single", "amrap"].includes(it.k) && it.ex !== "pausa") {
+    if (h.id === it.ex && esBasico(it) && it.ex !== "pausa") {
       const lift = it.lift || "banca", est = Math.max(0, ...estimables(it, prev.sets).map(e1rm));
       if (est) {
         const actual = rmDe(s.w, lift), v = r05(est);
-        fb = `<div class="feedback">Tu registro estima un máximo de ≈ ${kg(v)} (usas ${kg(actual)}).${Math.abs(v - actual) / actual >= 0.02 ? ` <button class="link-btn" data-setrm="${lift}" data-v="${v}" data-w="${s.w}">Usar ${kg(v)} como máximo</button>` : ""}</div>`;
-      } else if (prev.sets.some(x => x.rpe != null)) fb = `<div class="hint">Con tanto margen hasta el fallo, el máximo no se puede estimar bien (p.115, p.120). Para estimarlo sirve una serie de 1–3 reps a RPE 8–9 (p.118).</div>`;
-      else fb = `<div class="hint">Anota el RPE de alguna serie para estimar tu máximo.</div>`;
+        fb = `<div class="prox"><span class="k">MÁXIMO</span><span>Tu registro estima un máximo de ≈ ${kg(v)} (usas ${kg(actual)}).${Math.abs(v - actual) / actual >= 0.02 ? ` <button class="link-btn" data-setrm="${lift}" data-v="${v}" data-w="${s.w}">Usar ${kg(v)} como máximo</button>` : ""}</span></div>`;
+      } else if (prev.sets.some(x => x.rpe != null)) fb = `<p class="hint">Con tanto margen hasta el fallo, el máximo no se puede estimar bien (p.115, p.120). Para estimarlo sirve una serie de 1–3 reps a RPE 8–9 (p.118).</p>`;
+      else fb = `<p class="hint">Anota el RPE de alguna serie para estimar tu máximo.</p>`;
     }
-    if (it.k === "acc" && PROG[h.id] && PROG[h.id].w === s.w) fb = `<div class="feedback">Próxima vez en ${esc(h.n)}: <b class="mono">${kg(PROG[h.id].next)}</b> · ${esc(PROG[h.id].motivo)}.</div>`;
+    if (it.k === "acc" && PROG[h.id] && PROG[h.id].w === s.w) fb = `<div class="prox"><span class="k">PRÓXIMA</span><span>Próxima vez en ${esc(h.n)}: <b class="mono">${kg(PROG[h.id].next)}</b> · ${esc(PROG[h.id].motivo)}.</span></div>`;
   }
+  const nc = (CLAUDE[s.w] || {})[claveDe(d.id, it)];
+  if (nc && nc.txt) fb += `<div class="claude"><span class="k">CLAUDE</span><p>${esc(nc.txt)}</p></div>`;
+  return fb;
+}
+function itemRow(s, d, it) {
+  if (it.k === "nota") return `<div class="paso nota"><div class="riel"><i class="nodo"></i><s></s></div><div class="cuerpo"><b>${esc(it.n)}</b><span>${esc(it.txt)}</span></div></div>`;
+  if (it.k === "pot") return `<div class="paso pot"><div class="riel"><i class="nodo"></i><s></s></div><div class="cuerpo"><span class="tag">Potencia · descanso ${descanso(it)}</span><b class="nombre">${esc(it.n)}</b><span class="v">${esc(planTxt(s, it))}</span>${it.txt ? `<span class="hint">${esc(it.txt)}</span>` : ""}</div></div>`;
+  const key = claveDe(d.id, it), prev = (LOG[s.w] || {})[key];
+  const [cls, txt] = estadoItem(s, it, prev);
+  const h = registrado(prev) ? hechoDe(prev, it) : null;
+  const hecho = !h ? "" : prev.omitido ? "No lo hiciste" : (h.id !== it.ex ? h.n + ": " : "") + resumen(prev.sets);
   const det = detalleTxt(s, it);
-  const nc = (CLAUDE[s.w] || {})[key];
-  if (nc && nc.txt) fb += `<div class="claude"><span class="k">CLAUDE</span><span>${esc(nc.txt)}</span></div>`;
-  return `<div class="row">
-    <button class="ex" data-open="${esc(key)}">
-      <div class="ex-head"><div class="ex-name"><span class="tags">${tags.join("")}</span><b>${esc(it.n)}</b></div><span class="chip ${cls}">${txt}</span></div>
-      <div class="grid2"><span class="k">PLAN</span><span class="v">${esc(planTxt(s, it))}</span>${hecho}</div>
-      ${prev && prev.com ? `<span class="quote">“${esc(prev.com)}”</span>` : ""}
-    </button>
-    ${fb ? `<div style="margin-top:6px">${fb}</div>` : ""}
-    ${det.length ? `<details class="more"><summary>Detalles</summary><div>${det.map(esc).join("<br>")}</div></details>` : ""}
-  </div>`;
+  const extra = feedbackHtml(s, d, it, prev) + (det.length ? `<details class="more"><summary>Detalles</summary><div>${det.map(esc).join("<br>")}</div></details>` : "");
+  const abierto = ui.abierto === key && edit && edit.key === key && edit.w === s.w;
+  if (!abierto) return `<div class="paso ${cls}"><div class="riel"><i class="nodo"></i><s></s></div><div class="cuerpo">
+    <button class="ex" data-abrir="${esc(key)}" aria-expanded="false">
+      <span class="ex-h"><b class="nombre">${esc(it.n)}</b><span class="chip ${cls}">${txt}</span></span>
+      <span class="kv"><span class="k">PLAN</span><span class="v">${esc(planTxt(s, it))}</span>${hecho ? `<span class="k">HECHO</span><span class="v fuerte">${esc(hecho)}</span>` : ""}</span>
+      ${prev && prev.com ? `<span class="cita">“${esc(prev.com)}”</span>` : ""}
+    </button>${extra}</div></div>`;
+  const sets = prev && prev.sets && !prev.omitido ? prev.sets : [];
+  const tags = [esBasico(it) ? "Básico" : it.prio ? "Prioridad" : "", "descanso " + descanso(it)].filter(Boolean).join(" · ");
+  const chips = sets.map((x, i) => `<button class="sc hecha${i === edit.idx ? " sel" : ""}" data-editset="${i}" aria-pressed="${i === edit.idx}" aria-label="Editar la serie ${i + 1}">${ICON.ok}${i + 1} · ${esc(serieTxt(x))}</button>`).join("")
+    + `<button class="sc nueva${edit.idx === sets.length ? " sel" : ""}" data-editset="${sets.length}" aria-pressed="${edit.idx === sets.length}">${sets.length + 1} · ${edit.idx === sets.length ? "en curso" : "nueva"}</button>`;
+  return `<div class="paso abierto ${cls}"><div class="riel"><i class="nodo"></i><s></s></div><div class="cuerpo">
+    <div class="tarjeta">
+      <button class="ex" data-abrir="${esc(key)}" aria-expanded="true">
+        <span class="ex-h"><b class="nombre">${esc(it.n)}</b><span class="tag">${esc(tags)}</span></span>
+        <span class="v">${esc(planTxt(s, it))}</span>
+      </button>
+      <div class="scs">${chips}</div>
+      <div class="editor">${stepper("kg", edit.kg)}${stepper("reps", edit.reps)}</div>
+      ${rpeHtml(edit.rpe)}
+      <button class="link-row" data-open="${esc(key)}">${ICON.ajustes}<span>Variante, todas las series y comentario</span>${ICON.next}</button>
+    </div>${extra}</div></div>`;
 }
 function renderHoy() {
   const s = W[ui.week - 1], d = s.dias[ui.day], log = LOG[s.w] || {};
-  const extras = log["x~" + d.id] || [];
-  const nd = log["n~" + d.id];
-  const ncDia = (CLAUDE[s.w] || {})["dia~" + d.id];
-  $("#v-hoy").innerHTML = `
-    ${ncDia && ncDia.txt ? `<div class="claude" style="margin:12px 0 4px"><span class="k">CLAUDE · ESTE DÍA</span><span>${esc(ncDia.txt)}</span></div>` : ""}
-    <div class="list">${d.items.map(it => itemRow(s, d, it)).join("") || '<p class="mut">Día libre o de movilidad.</p>'}</div>
-    ${extras.length ? `<h2>Extras</h2><div class="list">${extras.map((x, i) => `<div class="row"><div class="ex-head"><div class="ex-name"><span class="tags"><span class="tag m">Extra</span></span><b>${esc(x.n)}</b></div>
-      <button class="btn quiet" style="min-height:36px;padding:0 12px" data-delx="${d.id}" data-i="${i}">Borrar</button></div>
-      <div class="grid2" style="margin-top:8px"><span class="k">HECHO</span><span class="v strong">${esc(resumen(x.sets))}</span></div></div>`).join("")}</div>` : ""}
-    <div class="btn-row" style="margin-top:20px"><button class="btn ghost" data-extra-open="${d.id}">Añadir ejercicio extra</button></div>
-    <h2>Notas del día</h2>
-    <textarea class="inp" rows="3" data-dn="${d.id}" placeholder="Sueño, cansancio, tenis ese día, cambios de orden… (se guarda solo)" aria-label="Notas del día">${esc(nd && nd.txt ? nd.txt : "")}</textarea>`;
+  if (ui.abierto === undefined) ui.abierto = s.w === st.actual ? pendienteDelDia(s, d) : null;
+  if (ui.abierto && !(edit && edit.key === ui.abierto && edit.w === s.w)) edit = nuevoEdit(s.w, ui.abierto);
+  if (!ui.abierto) edit = null;
+  const ej = itemsEj(d), regs = ej.map(it => log[claveDe(d.id, it)]).filter(registrado);
+  const series = regs.reduce((a, x) => a + (x.sets ? x.sets.length : 0), 0);
+  const plan = ej.reduce((a, it) => a + nSeries(it), 0);
+  const extras = log["x~" + d.id] || [], nd = log["n~" + d.id], ncDia = (CLAUDE[s.w] || {})["dia~" + d.id];
+  const ctx = s.w === st.actual ? "" : `<div class="ctx"><span>${esPlantilla(s.w) ? "Plantilla" : s.w < st.actual ? "Ya pasó" : "Por venir"} · S${s.w} · ${esc(etiqueta(s))}</span><button class="link-btn" data-today>Ir a la S${st.actual}</button></div>`;
+  const sub = !ej.length ? `D${ui.day + 1} · sin ejercicios con series` : `D${ui.day + 1} · ${ej.length} ejercicios · ${series} de ${plan} series`;
+  $("#v-hoy").innerHTML = `${ctx}${dayNav(s)}
+    <div class="titulo"><h1>${esc(d.n)}</h1><p class="sub">${esc(sub)}</p></div>
+    ${ncDia && ncDia.txt ? `<div class="claude"><span class="k">CLAUDE · ESTE DÍA</span><p>${esc(ncDia.txt)}</p></div>` : ""}
+    <div class="linea">${d.items.map(it => itemRow(s, d, it)).join("") || '<p class="mut">Día libre o de movilidad.</p>'}</div>
+    ${extras.length ? `<h2>Extras</h2><div class="lista">${extras.map((x, i) => `<div class="row"><div class="ex-h"><b class="nombre">${esc(x.n)}</b><button class="btn quiet chico" data-delx="${d.id}" data-i="${i}">Borrar</button></div>
+      <div class="kv"><span class="k">HECHO</span><span class="v fuerte">${esc(resumen(x.sets))}</span></div></div>`).join("")}</div>` : ""}
+    <div class="acciones"><button class="btn ghost" data-extra-open="${d.id}">Añadir ejercicio extra</button></div>
+    <label class="fl notas">Notas del día<textarea class="inp" rows="3" data-dn="${d.id}" placeholder="Sueño, cansancio, tenis ese día, cambios de orden… (se guarda solo)">${esc(nd && nd.txt ? nd.txt : "")}</textarea></label>`;
+}
+/* Mientras escribes no se redibuja: solo se actualizan los números, el RPE y la barra. */
+function pintarEditor() {
+  if (!edit) return;
+  const r = $("#v-hoy");
+  ["kg", "reps"].forEach(fld => { const i = r.querySelector(`[data-ed="${fld}"]`); if (i && document.activeElement !== i) i.value = numTxt(edit[fld]); });
+  r.querySelectorAll(".tarjeta [data-rpe]").forEach(b => b.setAttribute("aria-pressed", String(edit.rpe != null && +b.dataset.rpe === +edit.rpe)));
+  pintarBarra();
+}
+function guardarSerie() {
+  if (!edit) return;
+  const {w, key} = edit, s = W[w - 1], it = itemDeClave(w, key); if (!it) return;
+  const reps = num(edit.reps), kgv = num(edit.kg);
+  if (!(reps > 0)) { toast("Anota las reps de la serie."); return; }
+  const prev = (LOG[w] || {})[key];
+  const sets = prev && prev.sets && !prev.omitido ? prev.sets.slice() : [];
+  const i = Math.min(edit.idx, sets.length);
+  sets[i] = {kg: kgv ?? 0, reps, rpe: edit.rpe == null ? null : +edit.rpe};
+  const entry = {v: 2, t: Date.now(), plan: {id: it.ex, n: nombrePlan(it)}, hecho: hechoDe(prev, it), sets};
+  if (prev && prev.com) entry.com = prev.com;
+  guardarEntrada(w, key, entry, it);
+  if (w === st.actual) iniciarDescanso(segundosDescanso(descanso(it)), nombrePlan(it));
+  const h = entry.hecho, pr = PROG[h.id], completo = sets.length >= nSeries(it) && i === sets.length - 1;
+  if (completo) {
+    const d = s.dias.find(x => x.id === key.split(":")[0]), sig = d ? pendienteDelDia(s, d) : null;
+    ui.abierto = sig; edit = sig ? nuevoEdit(w, sig) : null;
+  } else edit = nuevoEdit(w, key, sets.length);
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  ui.dockCtl = false;
+  render();
+  toast(`Serie ${i + 1} guardada.` + (completo && it.k === "acc" && pr && pr.w === w ? ` Próxima vez: ${kg(pr.next)}.` : ""));
 }
 
-/* ── render: Semana ── */
+/* ── render: Semana (la semana entera como planilla) ── */
 function barras(vol) {
   return `<div class="vol">${G.map(g => {
     const v = vol[g.id] || 0, w = Math.min(100, v / 24 * 100);
-    const c = v < 10 ? "#8a7a55" : v > 20 ? "#8a5a60" : "#6f8a78";
-    return `<div class="vr"><span>${esc(g.n)}</span><div class="track"><i class="band"></i><i class="fill" style="width:${w}%;background:${c}"></i></div><span class="vn">${f(v)}</span></div>`;
+    return `<div class="vr"><span>${esc(g.n)}</span><div class="track"><i class="band"></i><i class="fill${v >= 10 && v <= 20 ? " en" : ""}" style="width:${w}%"></i></div><span class="vn">${f(v)}</span></div>`;
   }).join("")}</div>`;
 }
 function renderSemana() {
-  const s = W[ui.week - 1], log = LOG[s.w] || {};
-  const c = ciclo(s);
+  const s = W[ui.week - 1], log = LOG[s.w] || {}, c = ciclo(s), plantilla = esPlantilla(s.w);
+  const estado = s.w === st.actual ? "semana actual" : plantilla ? "plantilla" : s.w < st.actual ? "ya pasó" : "por venir";
   const lifts = [], notas = [], faltan = [];
-  let tot = 0, hechos = 0, series = 0, diasCon = 0;
-  s.dias.forEach((d, i) => {
-    let alguno = false;
-    itemsEj(d).forEach(it => {
-      const prev = log[claveDe(d.id, it)];
-      tot++;
-      if (registrado(prev)) { hechos++; alguno = true; series += prev.sets ? prev.sets.length : 0; if (prev.com) notas.push([`D${i + 1} · ${nombrePlan(it)}`, prev.com]); }
-      else if (s.w <= st.actual && !esPlantilla(s.w)) faltan.push(`D${i + 1} ${nombrePlan(it)}`);
-      if (it.k === "main") lifts.push(`<div class="lift"><span class="k">D${i + 1} · ${esc(nombrePlan(it)).toUpperCase()}</span><span class="kg">${kg(r25(rmDe(s.w, it.lift) * it.pct / 100))}</span><span class="small mut">${it.sets} × ${it.reps} · RPE ${esc(it.rpe)}</span></div>`);
-    });
+  let tot = 0, hechos = 0, series = 0, plan = 0, diasCon = 0;
+  const filas = s.dias.map((d, i) => {
+    let alguno = false, sd = 0, pd = 0;
+    const q = itemsEj(d).map(it => {
+      const prev = log[claveDe(d.id, it)], [cls] = estadoItem(s, it, prev);
+      tot++; pd += nSeries(it);
+      if (registrado(prev)) { hechos++; alguno = true; sd += prev.sets ? prev.sets.length : 0; if (prev.com) notas.push([`D${i + 1} · ${nombrePlan(it)}`, prev.com]); }
+      else if (s.w <= st.actual && !plantilla) faltan.push(`D${i + 1} ${nombrePlan(it)}`);
+      if (it.k === "main") lifts.push(`<div class="lift"><span class="k">D${i + 1} · ${esc(nombrePlan(it))}</span><span class="kg">${kg(r25(rmDe(s.w, it.lift) * it.pct / 100))}</span><span class="d">${it.sets} × ${it.reps} · RPE ${esc(it.rpe)}</span>${registrado(prev) && !prev.omitido ? `<span class="h">hecho ${esc(resumen(prev.sets))}</span>` : ""}</div>`);
+      return `<i class="q ${cls}"></i>`;
+    }).join("");
+    series += sd; plan += pd;
     const nd = log["n~" + d.id]; if (nd && nd.txt) notas.push([`D${i + 1} · notas del día`, nd.txt]);
     if (alguno) diasCon++;
-  });
-  const plantilla = esPlantilla(s.w);
-  const estado = s.w === st.actual ? "Semana actual" : plantilla ? "Plantilla" : s.w < st.actual ? "Ya pasó" : "Por venir";
+    const pot = d.items.some(it => it.k === "pot");
+    return `<button class="sem-fila" data-goday="${i}"><b>D${i + 1}</b><span class="sem-n"><span>${esc(d.n)}</span><span class="cuadros">${q}</span></span><span class="small mut">${pot ? "+ potencia" : ""}</span><span class="mono">${sd}/${pd}</span></button>`;
+  }).join("");
+  const nc = (CLAUDE[s.w] || {}).semana;
   $("#v-semana").innerHTML = `
-    <div class="chips"><span class="pill">${esc(c.n)}</span><span class="pill" style="border-color:transparent;background:${colorSemana(s)};color:#f2f0eb">${esc(etiqueta(s))}</span><span class="pill">${estado}</span></div>
-    <p style="margin-top:14px">${esc(s.nota)}</p>${s.nota_libro ? `<p class="small mut">${esc(s.nota_libro)}</p>` : ""}
-    ${(CLAUDE[s.w] || {}).semana && CLAUDE[s.w].semana.txt ? `<div class="claude" style="margin-top:10px"><span class="k">CLAUDE · ESTA SEMANA</span><span>${esc(CLAUDE[s.w].semana.txt)}</span></div>` : ""}
-    ${plantilla ? `<p class="small mut">Esta semana se rediseñó con la Pirámide cuando ya había pasado, así que queda como plantilla: sirve de modelo para repetir el bloque, no tiene registros pendientes.</p>` : ""}
-    ${s.w <= st.actual && !plantilla ? `<h2>Registro</h2><div class="stats"><div><span class="k">EJERCICIOS</span><span class="n">${hechos} / ${tot}</span></div><div><span class="k">SERIES</span><span class="n">${series}</span></div><div><span class="k">DÍAS</span><span class="n">${diasCon} / ${s.dias.length}</span></div></div>` : ""}
+    <div class="titulo-row"><div class="titulo"><h1>Semana ${s.w}</h1><p class="sub">${esc(c.n)} · ${esc(etiqueta(s))} · ${estado}</p></div>
+      <button class="circ" data-step="-1" aria-label="Semana anterior" ${s.w === 1 ? "disabled" : ""}>${ICON.back}</button>
+      <button class="circ" data-step="1" aria-label="Semana siguiente" ${s.w === 52 ? "disabled" : ""}>${ICON.next}</button></div>
+    ${s.w !== st.actual ? `<div class="ctx"><span>Vas en la S${st.actual}</span><button class="link-btn" data-today>Ir a la S${st.actual}</button></div>` : ""}
+    <div class="nota-plan"><span class="k">Plan · esta semana</span><p>${esc(s.nota)}</p>${s.nota_libro ? `<p class="small mut">${esc(s.nota_libro)}</p>` : ""}</div>
+    ${nc && nc.txt ? `<div class="claude"><span class="k">CLAUDE · ESTA SEMANA</span><p>${esc(nc.txt)}</p></div>` : ""}
+    ${plantilla ? `<p class="small mut" style="margin-top:12px">Esta semana se rediseñó con la Pirámide cuando ya había pasado, así que queda como plantilla: sirve de modelo para repetir el bloque, no tiene registros pendientes.</p>` : ""}
+    ${!plantilla && s.w <= st.actual ? `<div class="stats"><div><span class="k">EJERCICIOS</span><span class="n">${hechos} <small>/ ${tot}</small></span></div><div><span class="k">SERIES</span><span class="n">${series} <small>/ ${plan}</small></span></div><div><span class="k">DÍAS</span><span class="n">${diasCon} <small>/ ${s.dias.length}</small></span></div></div>` : ""}
+    <h2>La semana</h2>
+    <p class="small mut">Cada cuadro es un ejercicio; a la derecha, series anotadas sobre las del plan. Toca un día para abrirlo.</p>
+    <div class="sem">${filas}</div>
+    <div class="leyenda-q"><span><i class="q ok"></i>Hecho</span><span><i class="q par"></i>Parcial</span><span><i class="q cam"></i>Cambio</span><span><i class="q omi"></i>No lo hice</span><span><i class="q fal"></i>Falta</span></div>
     ${lifts.length ? `<h2>Básicos</h2><div class="lifts">${lifts.join("")}</div>` : ""}
-    ${notas.length ? `<h2>Tus notas</h2><div class="list">${notas.map(([t, x]) => `<div class="row"><span class="k">${esc(t.toUpperCase())}</span><p class="serif" style="font-style:italic;font-size:15.5px;margin:4px 0 0;color:var(--tx2)">“${esc(x)}”</p></div>`).join("")}</div>` : ""}
-    ${faltan.length ? `<h2>Sin registrar · ${faltan.length}</h2><div class="chips">${faltan.map(x => `<span class="pill">${esc(x)}</span>`).join("")}</div>` : ""}
-    <h2>Volumen de esta semana</h2>
-    <p class="small mut">Series por músculo: directas cuentan 1 e indirectas 0,5. La franja clara es el rango 10–20 <span class="pg">p.62</span>. El día de potencia no cuenta <span class="pg">p.139</span>.</p>
+    ${notas.length ? `<h2>Tus notas</h2><div class="notas-l">${notas.map(([t, x]) => `<div class="nota-i"><span class="k">${esc(t)}</span><p>“${esc(x)}”</p></div>`).join("")}</div>` : ""}
+    ${faltan.length ? `<h2>Sin registrar · ${faltan.length}</h2><div class="chips">${faltan.map(x => `<span class="pill fal">${esc(x)}</span>`).join("")}</div>` : ""}
+    <h2>Volumen ${s.w === st.actual ? "de esta semana" : "de la semana"}</h2>
+    <p class="small mut">Series del plan por músculo: directas 1, indirectas 0,5. La franja es el rango 10–20 <span class="pg">p.62</span>. El día de potencia no cuenta <span class="pg">p.139</span>.</p>
     ${barras(s.vol)}
-    ${s.w !== st.actual ? `<div class="btn-row" style="margin-top:24px"><button class="btn" data-actual="${s.w}">Marcar la semana ${s.w} como actual</button></div>` : ""}`;
+    ${s.w !== st.actual ? `<div class="acciones"><button class="btn" data-actual="${s.w}">Marcar la semana ${s.w} como actual</button></div>` : ""}`;
 }
 
 /* ── render: Año ── */
@@ -703,11 +793,12 @@ function renderAno() {
       <p class="small mut" style="margin-top:8px">${resumenBloques(ws)}</p></div>`;
   }).join("");
   $("#v-ano").innerHTML = `
+    <div class="titulo"><h1>Tu año</h1><p class="sub">Vas en la semana ${st.actual}. Toca una semana para abrirla.</p></div>
     <div class="stats"><div><span class="k">ESTÁS EN</span><span class="n">S${st.actual}</span></div><div><span class="k">PRÓX. TEST</span><span class="n">${prox.length ? "S" + prox[0] : "año 2"}</span></div><div><span class="k">BANCA</span><span class="n">${f(b)}</span></div></div>
     <h2>Tu avance</h2>
     ${avanceHtml()}
     <h2>El año</h2>
-    <p class="small mut">${esc(etiqueta(s))}. El punto blanco marca las semanas de test.</p>
+    <p class="small mut">${esc(etiqueta(s))}. El punto marca las semanas de test y la semana actual va con borde.</p>
     ${ciclos}
     <div class="legend">
       <span><i class="sw" style="background:var(--f-intro)"></i>Intro</span><span><i class="sw" style="background:var(--f-acc)"></i>Volumen</span>
@@ -775,19 +866,19 @@ function avanceHtml() {
   const y0 = Math.floor((Math.min(...vals) - 4) / 5) * 5, y1 = Math.ceil((Math.max(...vals) + 4) / 5) * 5;
   const X = w => L + (w - x0) / (x1 - x0) * (VW - L - R), Y = v => T + (y1 - v) / (y1 - y0) * (VH - T - B);
   const paso = (y1 - y0) > 30 ? 10 : 5, grid = [];
-  for (let v = y0; v <= y1; v += paso) grid.push(`<line x1="${L}" x2="${VW - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="#26282c" stroke-width="1"/><text x="${L - 6}" y="${Y(v) + 3.5}" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="#9c9890">${v}</text>`);
+  for (let v = y0; v <= y1; v += paso) grid.push(`<line x1="${L}" x2="${VW - R}" y1="${Y(v)}" y2="${Y(v)}" style="stroke:var(--line)" stroke-width="1"/><text x="${L - 6}" y="${Y(v) + 3.5}" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" style="fill:var(--mut)">${v}</text>`);
   const cada = (x1 - x0) > 10 ? 2 : 1, xs = [];
-  for (let w = x0; w <= x1; w += cada) xs.push(`<text x="${X(w)}" y="${VH - 8}" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="#9c9890">S${w}</text>`);
-  const linea = pts.length > 1 ? `<path d="${pts.map((p, i) => (i ? "L" : "M") + X(p.w).toFixed(1) + " " + Y(p.v).toFixed(1)).join(" ")}" fill="none" stroke="#b9a27a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` : "";
+  for (let w = x0; w <= x1; w += cada) xs.push(`<text x="${X(w)}" y="${VH - 8}" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" style="fill:var(--mut)">S${w}</text>`);
+  const linea = pts.length > 1 ? `<path d="${pts.map((p, i) => (i ? "L" : "M") + X(p.w).toFixed(1) + " " + Y(p.v).toFixed(1)).join(" ")}" fill="none" style="stroke:var(--acc)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` : "";
   const refY = Y(ref);
-  const puntos = pts.map((p, i) => `<circle class="hit" data-pt="${i}" cx="${X(p.w)}" cy="${Y(p.v)}" r="16" fill="transparent" tabindex="0" role="button" aria-label="${esc(tipAvance(p))}"/><circle class="pt" cx="${X(p.w)}" cy="${Y(p.v)}" r="4.5" fill="#b9a27a" stroke="#111214" stroke-width="2" pointer-events="none"/>`).join("");
+  const puntos = pts.map((p, i) => `<circle class="hit" data-pt="${i}" cx="${X(p.w)}" cy="${Y(p.v)}" r="16" fill="transparent" tabindex="0" role="button" aria-label="${esc(tipAvance(p))}"/><circle class="pt" cx="${X(p.w)}" cy="${Y(p.v)}" r="4.5" style="fill:var(--acc);stroke:var(--bg)" stroke-width="2" pointer-events="none"/>`).join("");
   const sel = pts[ui.avPt != null && pts[ui.avPt] ? ui.avPt : pts.length - 1];
   return `${seg}
     <figure class="chart" style="margin:12px 0 0">
       <svg viewBox="0 0 ${VW} ${VH}" role="img" aria-label="${esc(LIFT_N[lift])}: máximo estimado por semana">
         ${grid.join("")}${xs.join("")}
-        <line x1="${L}" x2="${VW - R}" y1="${refY}" y2="${refY}" stroke="#6f6c66" stroke-width="1.5" stroke-dasharray="4 4"/>
-        <text x="${VW - R}" y="${refY - 5}" text-anchor="end" font-family="IBM Plex Sans, sans-serif" font-size="10.5" fill="#9c9890">máximo del plan ${f(ref)}</text>
+        <line x1="${L}" x2="${VW - R}" y1="${refY}" y2="${refY}" style="stroke:var(--faint)" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <text x="${VW - R}" y="${refY - 5}" text-anchor="end" font-family="IBM Plex Sans, sans-serif" font-size="10.5" style="fill:var(--mut)">máximo del plan ${f(ref)}</text>
         ${linea}${puntos}
       </svg>
       <figcaption class="small" id="av-tip" style="color:var(--tx2);margin-top:6px">${esc(tipAvance(sel))}</figcaption>
@@ -800,22 +891,27 @@ function avanceHtml() {
     </tbody></table></div></details>`;
 }
 
-/* ── temporizador de descanso ── */
+/* ── barra inferior: descanso y serie en curso ──
+   La misma barra en todas las pestañas: el anillo cuenta el descanso y el botón guarda la serie que
+   tienes abierta en Hoy. Sin serie abierta, solo aparece mientras corre un descanso. */
 const TKEY = "exp-descanso";
+const ANILLO = 138.2;  // 2πr, r = 22
 let descansoT = null, reloj = null, audioCtx = null;
 try { descansoT = JSON.parse(localStorage.getItem(TKEY) || "null"); } catch (e) {}
 const segundosDescanso = txt => { const m = String(txt).match(/(\d+)/); return m ? +m[1] * 60 : 120; };  // el mínimo del rango
 function guardarDescanso() { try { descansoT ? localStorage.setItem(TKEY, JSON.stringify(descansoT)) : localStorage.removeItem(TKEY); } catch (e) {} }
 function iniciarDescanso(seg, nombre) {
   try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
-  descansoT = {fin: Date.now() + seg * 1000, nombre};
+  descansoT = {fin: Date.now() + seg * 1000, total: seg, nombre};
   guardarDescanso();
+  renderDock();
   tickDescanso();
 }
 function pararDescanso() {
   descansoT = null; guardarDescanso();
   clearInterval(reloj); reloj = null;
-  $("#timer-root").innerHTML = "";
+  ui.dockCtl = false;
+  if (sheet) renderSheet(); else renderDock();
 }
 function avisoDescanso() {
   try { if (navigator.vibrate) navigator.vibrate([400, 200, 400]); } catch (e) {}
@@ -826,19 +922,46 @@ function avisoDescanso() {
     o.start(); o.stop(audioCtx.currentTime + 0.35);
   } catch (e) {}
 }
+const quedan = () => descansoT ? Math.ceil((descansoT.fin - Date.now()) / 1000) : 0;
+const mmss = r => `${Math.floor(r / 60)}:${String(r % 60).padStart(2, "0")}`;
 function tickDescanso() {
   if (!descansoT) return;
-  const r = Math.ceil((descansoT.fin - Date.now()) / 1000);
+  const r = quedan();
   if (r <= 0) { const n = descansoT.nombre; pararDescanso(); avisoDescanso(); toast(`Descanso terminado${n ? " · " + n : ""}. A la siguiente serie.`); return; }
-  const root = $("#timer-root");
-  if (!root.firstChild) root.innerHTML = `<div class="timer" role="group" aria-label="Descanso">
-    <span class="timer-t" id="timer-t"></span>
-    <button data-tmas="-30" aria-label="Restar 30 segundos">−30</button>
-    <button data-tmas="30" aria-label="Sumar 30 segundos">+30</button>
-    <button data-tstop aria-label="Parar el descanso">Parar</button></div>`;
-  $("#timer-t").textContent = `Descanso ${Math.floor(r / 60)}:${String(r % 60).padStart(2, "0")}`;
+  if (!$("#dock-t") && !sheet) renderDock();
+  const t = $("#dock-t"), p = $("#dock-p");
+  if (t) t.textContent = mmss(r);
+  if (p) p.setAttribute("stroke-dasharray", `${(Math.min(1, Math.max(0, 1 - r / (descansoT.total || r))) * ANILLO).toFixed(1)} ${ANILLO}`);
   if (!reloj) reloj = setInterval(tickDescanso, 250);
 }
+function anilloHtml(plan) {
+  const r = quedan(), hecho = descansoT ? Math.min(1, Math.max(0, 1 - r / (descansoT.total || r || 1))) : 0;
+  const txt = descansoT ? mmss(Math.max(0, r)) : plan ? plan.replace(" min", "′").replace(/ en par$/, "") : "";
+  return `<button class="anillo" data-anillo aria-label="Descanso${descansoT ? ": quedan " + mmss(Math.max(0, r)) : ""}. Controles del descanso">
+    <svg viewBox="0 0 52 52" aria-hidden="true"><circle class="tr" cx="26" cy="26" r="22"/><circle class="pr" id="dock-p" cx="26" cy="26" r="22" stroke-dasharray="${(hecho * ANILLO).toFixed(1)} ${ANILLO}" transform="rotate(-90 26 26)"/></svg>
+    <span id="dock-t">${txt}</span></button>`;
+}
+function controlesDescanso(it) {
+  if (!ui.dockCtl) return "";
+  return `<div class="dock-ctl" role="group" aria-label="Descanso">${descansoT
+    ? `<button data-tmas="-30">−30 s</button><button data-tmas="30">+30 s</button><button data-tstop>Parar</button>`
+    : `<button data-descanso>Iniciar descanso${it ? " · " + esc(descanso(it)) : ""}</button>`}</div>`;
+}
+const itemEdit = () => edit ? itemDeClave(edit.w, edit.key) : null;
+function valorEdit() { return edit ? serieTxt({kg: edit.kg, reps: edit.reps, rpe: edit.rpe}) : ""; }
+function renderDock() {
+  const root = $("#dock-root"), it = itemEdit(); if (!root) return;
+  const ver = !sheet && (it || descansoT);
+  document.body.classList.toggle("con-dock", !!ver);
+  if (!ver) { root.innerHTML = ""; return; }
+  root.innerHTML = `<div class="dock">${controlesDescanso(it)}<div class="dock-in">
+    ${anilloHtml(it ? descanso(it) : "")}
+    <div class="dock-txt"><span class="k" id="dock-l">${it ? `Serie ${edit.idx + 1} · ${esc(nombrePlan(it))}` : `Descanso${descansoT.nombre ? " · " + esc(descansoT.nombre) : ""}`}</span><span class="v" id="dock-v">${it ? esc(valorEdit()) : "a la siguiente serie"}</span></div>
+    ${it ? `<button class="dock-ok" data-guardarset aria-label="Guardar la serie ${edit.idx + 1}">${ICON.ok}</button>`
+      : `<button class="dock-ok" data-tstop aria-label="Parar el descanso">${ICON.x}</button>`}
+  </div></div>`;
+}
+function pintarBarra() { const v = $("#dock-v"); if (v && edit) v.textContent = valorEdit(); }
 
 /* ── render: Más ── */
 const BLOQUES = [
@@ -868,10 +991,10 @@ function masVolumen() {
   const head = `<tr><th>Músculo</th>${W.map(s => `<th class="${s.w === 11 || s.w === 19 ? "sep" : ""}">S${s.w}</th>`).join("")}</tr>`;
   const body = G.map(g => `<tr><td>${esc(g.n)}</td>${W.map(s => {
     const v = s.vol[g.id] || 0;
-    const bg = v < 10 ? "rgba(138,122,85,.28)" : v > 20 ? "rgba(138,90,96,.42)" : "rgba(111,138,120,.26)";
-    return `<td class="${s.w === 11 || s.w === 19 ? "sep" : ""}" style="background:${bg}">${f(v)}</td>`;
+    const c = v < 10 ? "h-bajo" : v > 20 ? "h-sobre" : "h-en";
+    return `<td class="${c}${s.w === 11 || s.w === 19 ? " sep" : ""}">${f(v)}</td>`;
   }).join("")}</tr>`).join("");
-  return `<p class="small mut" style="margin-top:16px">Las rayas separan S1–S10 (Pirámide), S11–S18 (tu M3) y el plan nuevo desde S19. Verde: 10–20. Ocre: bajo 10. Rojo: sobre 20. Desliza la tabla hacia los lados.</p>
+  return `<p class="small mut" style="margin-top:16px">Las rayas separan S1–S10 (Pirámide), S11–S18 (tu M3) y el plan nuevo desde S19. Tono claro: bajo 10. Medio: 10–20. Fuerte: sobre 20. Desliza la tabla hacia los lados.</p>
     <div class="tw"><table class="heat"><thead>${head}</thead><tbody>${body}</tbody></table></div>
     <div class="rule"><h3>Cómo se cuenta</h3><p>Cada serie directa vale 1 y cada indirecta 0,5: es tu regla (Pelland 2026). Qué es directo y qué indirecto sale de la tabla de músculos de p.214. <b>Conflicto de fuentes:</b> el libro cuenta primario y secundario igual (p.213), así que con su conteo estos números serían más altos. El día de potencia no cuenta (p.139, p.49).</p></div>
     <div class="rule"><h3>Rango y por qué no va más alto</h3><p>10–20 series por músculo y semana (p.62); para intermedio, 13–15 de partida (p.208). Con tenis tres veces por semana hay fatiga de afuera, y el volumen óptimo baja (p.61). Por eso casi todo queda entre 10 y 17, y la prioridad (brazos, hombros, isquios) sube primero.</p></div>
@@ -962,8 +1085,24 @@ function masDatos() {
       <p class="small mut" id="g-msg"></p>
     </div>`;
 }
+function masTema() {
+  const muestra = t => `<span class="muestra" style="background:${t.bg};border-color:${t.line}"><i style="background:${t.tx}"></i><u style="background:${t.acc}"></u></span>`;
+  const fila = (id, n, tipo, sw) => `<button class="tema-f" role="radio" data-tema="${id}" aria-checked="${tema.modo === id}">${sw}<span class="tema-n"><b>${esc(n)}</b><span>${esc(tipo)}</span></span>${tema.modo === id ? ICON.ok : ""}</button>`;
+  const claro = TEMAS.find(t => t.id === tema.claro) || TEMAS[0], oscuro = TEMAS.find(t => t.id === tema.oscuro) || TEMAS[1];
+  const op = (tipo, sel) => TEMAS.filter(t => t.tipo === tipo).map(t => `<option value="${t.id}" ${t.id === sel ? "selected" : ""}>${esc(t.n)}</option>`).join("");
+  return `<div class="tema-l" role="radiogroup" aria-label="Tema">
+    ${TEMAS.map(t => fila(t.id, t.n, (t.tipo === "claro" ? "Claro" : "Oscuro") + (t.id === "hueso" ? " · por defecto" : ""), muestra(t))).join("")}
+    ${fila("auto", "Automático", "Sigue el modo claro u oscuro del teléfono", `<span class="muestra auto" style="background:linear-gradient(90deg, ${claro.bg} 50%, ${oscuro.bg} 50%);border-color:var(--line)"><i style="background:${claro.tx}"></i><u style="background:${oscuro.acc}"></u></span>`)}
+  </div>
+  ${tema.modo === "auto" ? `<div class="calc2"><label class="fl">De día<select class="inp" data-tema-claro>${op("claro", tema.claro)}</select></label><label class="fl">De noche<select class="inp" data-tema-oscuro>${op("oscuro", tema.oscuro)}</select></label></div>` : ""}
+  <p class="small mut" style="margin-top:12px">Se guarda en este teléfono. Tus registros no cambian.</p>`;
+}
 function renderMas() {
-  let body = {bloques: masBloques, volumen: masVolumen, reglas: masReglas, datos: masDatos}[ui.mas]();
+  const [t, sub] = {bloques: ["Bloques del año", "Qué hace cada bloque y de qué página sale."], volumen: ["Volumen por músculo", "Series por músculo, semana a semana."],
+    reglas: ["Reglas y herramientas", "Checklist, calculadoras y las reglas del plan."], datos: ["Tus datos", "Dónde se guarda tu registro."], tema: ["Tema", "Los colores de toda la app."]}[ui.mas] || ["Más", ""];
+  let body = `<div class="titulo"><h1>${t}</h1><p class="sub">${sub}</p></div>
+    <div class="seg" style="--n:5" role="group" aria-label="Secciones de Más">${[["bloques", "Bloques"], ["volumen", "Volumen"], ["reglas", "Reglas"], ["datos", "Datos"], ["tema", "Tema"]].map(([id, n]) => `<button data-mas="${id}" aria-pressed="${ui.mas === id}">${n}</button>`).join("")}</div>`
+    + ({bloques: masBloques, volumen: masVolumen, reglas: masReglas, datos: masDatos, tema: masTema}[ui.mas] || masBloques)();
   if (ui.mas === "datos") body += `<h2>Versión ${VERSION.n} · ${esc(VERSION.nombre)}</h2>
     <div class="list">${VERSIONES.map(v => `<div class="row"><span class="k">V${v.n} · ${esc(v.nombre.toUpperCase())} · ${esc(v.fecha.toUpperCase())}</span><p class="small" style="margin:3px 0 0;color:var(--tx2)">${esc(v.txt)}</p></div>`).join("")}</div>`;
   $("#v-mas").innerHTML = body;
@@ -987,7 +1126,7 @@ function actualizarPeso() {
   out.textContent = p > 0 ? `+${f(p * .005)} a +${f(p * .01)} kg por mes (≈ +${f(p * .005 / 4)} a +${f(p * .01 / 4)} kg por semana)` : "Escribe tu peso para ver el ritmo.";
 }
 
-/* ── hoja de registro ── */
+/* ── hoja de registro: el ejercicio en foco ── */
 function antesDe(w, key, it) {
   for (let x = w - 1; x >= 1; x--) {
     const p = LOG[x] && LOG[x][key];
@@ -996,27 +1135,27 @@ function antesDe(w, key, it) {
   const pr = PROG[it.ex];
   return pr ? `S${pr.w} · ${kg(pr.kg)} (${pr.motivo})` : "Sin registro anterior";
 }
+const filaVacia = r => String(r.kg ?? "").trim() === "" && String(r.reps ?? "").trim() === "" && String(r.rpe ?? "").trim() === "";
 function abrirRegistro(w, key) {
-  const s = W[w - 1], it = itemDeClave(w, key); if (!it) return;
+  const it = itemDeClave(w, key); if (!it) return;
   const prev = LOG[w] && LOG[w][key];
-  const n = it.k === "single" || it.k === "amrap" ? 1 : +it.sets || 1;
   const rows = [];
-  for (let i = 0; i < Math.max(n, prev && prev.sets ? prev.sets.length : 0); i++) {
+  for (let i = 0; i < Math.max(nSeries(it), prev && prev.sets ? prev.sets.length : 0); i++) {
     const v = (prev && prev.sets && prev.sets[i]) || {};
-    rows.push({kg: v.kg ?? "", reps: v.reps ?? "", rpe: v.rpe ?? ""});
+    rows.push({kg: v.kg == null ? "" : numTxt(v.kg), reps: v.reps ?? "", rpe: v.rpe == null ? "" : numTxt(v.rpe)});
   }
-  const hecho = hechoDe(prev, it);
-  const ops = opcionesHecho(it);
-  const esOtro = !ops.some(o => o[0] === hecho.id);
-  sheet = {tipo: "reg", w, key, it, rows, hid: esOtro ? "otro" : hecho.id, otro: esOtro ? hecho.n : "", com: (prev && prev.com) || ""};
+  const hecho = hechoDe(prev, it), esOtro = !opcionesHecho(it).some(o => o[0] === hecho.id);
+  const libre = rows.findIndex(filaVacia);
+  sheet = {tipo: "reg", w, key, it, rows, sel: libre >= 0 ? libre : rows.length - 1, hid: esOtro ? "otro" : hecho.id, otro: esOtro ? hecho.n : "", com: (prev && prev.com) || ""};
+  ui.dockCtl = false;
   [w - 1, w - 2].filter(x => x >= 1).forEach(x => cargarSemana(x));
-  renderSheet();
+  renderSheet(true);
 }
 function abrirExtra(did) {
-  sheet = {tipo: "extra", w: ui.week, did, nombre: "", rows: [1, 2, 3, 4].map(() => ({kg: "", reps: "", rpe: ""}))};
-  renderSheet();
+  sheet = {tipo: "extra", w: ui.week, did, nombre: "", rows: [1, 2, 3].map(() => ({kg: "", reps: "", rpe: ""}))};
+  renderSheet(true);
 }
-function cerrarSheet() { sheet = null; $("#sheet-root").innerHTML = ""; document.body.style.overflow = ""; render(); }
+function cerrarSheet() { sheet = null; ui.dockCtl = false; $("#sheet-root").innerHTML = ""; document.body.style.overflow = ""; render(); }
 function placeholders() {
   const s = W[sheet.w - 1], it = sheet.it;
   const hid = sheet.hid === "otro" ? "otro:" + slug(sheet.otro || "") : sheet.hid;
@@ -1026,7 +1165,7 @@ function placeholders() {
     rpe: it.rpe_esp || (it.rpe ? rango(it.rpe)[1] : ""),
   };
 }
-function setsHtml(ph) {
+function setsHtml(ph) {  // series del ejercicio extra
   return sheet.rows.map((r, i) => `<div class="set"><span class="n">${i + 1}</span>
     <input class="inp" type="text" inputmode="decimal" data-i="${i}" data-f="kg" value="${esc(r.kg)}" placeholder="${esc(ph.kg)}" aria-label="Kilos, serie ${i + 1}">
     <input class="inp" type="text" inputmode="numeric" data-i="${i}" data-f="reps" value="${esc(r.reps)}" placeholder="${esc(ph.reps)}" aria-label="Reps, serie ${i + 1}">
@@ -1036,54 +1175,89 @@ function sumTxt() {
   const v = leerSets();
   return v.length ? `${v.length} ${v.length === 1 ? "serie" : "series"} · ${v.reduce((a, x) => a + x.reps, 0)} reps` : "Sin series anotadas";
 }
-function renderSheet() {
+function tablaSeries(ph) {
+  const it = sheet.it;
+  return `<div class="tabla-s"><div class="h"><span>SERIE</span><span>KG</span><span>REPS</span><span>RPE</span><span></span></div>
+  ${sheet.rows.map((r, i) => {
+    const c = (v, p) => String(v) === "" ? `<span class="ph">${esc(p === "" || p == null ? "—" : p)}</span>` : `<span>${esc(v)}</span>`;
+    return `<button class="fila${i === sheet.sel ? " sel" : ""}" data-selrow="${i}" aria-pressed="${i === sheet.sel}" aria-label="Serie ${i + 1}"><span>${i + 1}</span>${c(r.kg, ph.kg)}${c(r.reps, ph.reps)}${c(r.rpe, it.rpe || "")}${filaVacia(r) ? "<span></span>" : ICON.ok}</button>`;
+  }).join("")}</div>`;
+}
+function grande(fld, r, ph) {
+  const inc = fld === "kg" ? incKg(sheet.it, hechoSheet().n) : 1;
+  return `<div class="gr"><span class="k">${fld === "kg" ? "KG" : "REPS"}</span>
+    <input class="num-g" data-f="${fld}" data-i="${sheet.sel}" type="text" inputmode="${fld === "kg" ? "decimal" : "numeric"}" value="${esc(r[fld])}" placeholder="${esc(ph[fld])}" aria-label="${fld === "kg" ? "Kilos" : "Reps"}, serie ${sheet.sel + 1}">
+    <div class="stp2"><button data-stp="${fld}" data-d="-1" aria-label="Restar ${f(inc)}">−${f(inc)}</button><button data-stp="${fld}" data-d="1" aria-label="Sumar ${f(inc)}">+${f(inc)}</button></div></div>`;
+}
+function renderSheet(primera) {
+  const cuerpo = $(".sheet-body"), scroll = cuerpo ? cuerpo.scrollTop : 0;
   document.body.style.overflow = "hidden";
   let html;
   if (sheet.tipo === "reg") {
     const s = W[sheet.w - 1], it = sheet.it, did = sheet.key.split(":")[0];
-    const di = s.dias.findIndex(d => d.id === did), ph = placeholders();
-    const ops = opcionesHecho(it);
-    html = `<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sh-t"><div class="sheet-in">
+    const di = s.dias.findIndex(d => d.id === did), d = s.dias[di], ph = placeholders(), ops = opcionesHecho(it);
+    const ej = itemsEj(d), pos = ej.findIndex(x => claveDe(did, x) === sheet.key), sig = ej[pos + 1];
+    const prev = (LOG[sheet.w] || {})[sheet.key], [cls, txt] = estadoItem(s, it, prev);
+    const r = sheet.rows[sheet.sel] || {kg: "", reps: "", rpe: ""};
+    html = `<div class="sheet${primera ? " entra" : ""}" role="dialog" aria-modal="true" aria-labelledby="sh-h"><div class="sheet-in">
       <div class="sheet-top"><button class="back" data-sheet-close aria-label="Volver">${ICON.back}</button>
-        <div class="top-txt"><span class="eyebrow">S${s.w} · D${di + 1} · ${esc(s.dias[di].n)}</span><h1 id="sh-t">${esc(nombrePlan(it))}</h1></div></div>
+        <div class="top-txt"><span class="eyebrow">S${s.w} · D${di + 1} · ejercicio ${pos + 1} de ${ej.length}</span><h1 id="sh-h">${esc(nombrePlan(it))}</h1></div>
+        <span class="chip ${cls}">${txt}</span></div>
+      <div class="prog" aria-hidden="true">${ej.map((x, i) => `<i class="${i < pos ? "p" : i === pos ? "a" : ""}"></i>`).join("")}</div>
       <div class="sheet-body">
-        <div class="grid2"><span class="k">PLAN</span><span class="v">${esc(planTxt(s, it))}</span><span class="k">ANTES</span><span class="v">${esc(antesDe(s.w, sheet.key, it))}</span></div>
+        <div class="kv"><span class="k">PLAN</span><span class="v">${esc(planTxt(s, it))}</span><span class="k">ANTES</span><span class="v">${esc(antesDe(s.w, sheet.key, it))}</span><span class="k">DESCANSO</span><span class="v">${esc(descanso(it))}</span></div>
+        ${detalleTxt(s, it).map(x => `<p class="small mut">${esc(x)}</p>`).join("")}
         <label class="fl">Hiciste<select class="inp" data-hecho>${ops.map(([id, nm]) => `<option value="${esc(id)}" ${id === sheet.hid ? "selected" : ""}>${esc(nm)}</option>`).join("")}<option value="otro" ${sheet.hid === "otro" ? "selected" : ""}>Otro…</option></select></label>
         <label class="fl" ${sheet.hid === "otro" ? "" : "hidden"} id="otro-wrap">¿Cuál?<input class="inp" data-otro value="${esc(sheet.otro)}" placeholder="Queda con este nombre"></label>
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <div class="sets-h"><span></span><span>KILOS</span><span>REPS</span><span>RPE</span></div>
-          <div id="sets" style="display:flex;flex-direction:column;gap:8px">${setsHtml(ph)}</div>
-          <p class="small mut" style="margin:0">Lo gris es lo sugerido: si escribes algo en una serie, lo vacío de esa serie toma lo sugerido. El RPE nunca se inventa.</p>
-          <div class="btn-row"><button class="btn ghost" data-add-set>Añadir serie</button><button class="btn quiet" data-del-set>Quitar la última</button></div>
-          <button class="btn" data-descanso>Iniciar descanso · ${esc(descanso(it))}</button>
-          <p class="small mut" style="margin:0">El descanso también empieza solo cuando anotas las reps de una serie esta semana.</p>
-        </div>
+        <section class="foco" aria-label="Serie ${sheet.sel + 1}">
+          <span class="k acc">Serie ${sheet.sel + 1} · ${filaVacia(r) ? "en curso" : "editando"}</span>
+          <div class="grandes">${grande("kg", r, ph)}<span class="por">×</span>${grande("reps", r, ph)}</div>
+          ${rpeHtml(r.rpe)}
+        </section>
+        <div id="tabla-series">${tablaSeries(ph)}</div>
+        <div class="btn-row"><button class="btn ghost" data-add-set>Añadir serie</button><button class="btn quiet" data-del-set>Quitar la última</button></div>
+        <p class="small mut">Lo tenue es lo sugerido por el plan: una serie con algo anotado toma lo sugerido en lo que dejes vacío. El RPE nunca se inventa.</p>
         <div class="btn-row"><button class="btn" data-igual>Igual al plan</button><button class="btn quiet" data-omit>No lo hice</button></div>
         <label class="fl">Comentario<textarea class="inp" rows="2" data-com placeholder="Cómo te sentiste, técnica, dolor… (opcional)">${esc(sheet.com)}</textarea></label>
+        ${sig ? `<div class="sig"><span class="k">Siguiente</span><b>${esc(sig.n)}</b><span class="v">${esc(planTxt(s, sig))}</span></div>` : ""}
       </div>
-      <div class="sheet-foot"><div class="sum"><span class="mono" id="sh-sum">${sumTxt()}</span><span class="small mut">Se guarda en el teléfono y en tu cuenta</span></div><button class="btn pri" data-save>Guardar</button></div>
+      <div class="sheet-foot">${controlesDescanso(it)}<div class="dock-in">${anilloHtml(descanso(it))}
+        <div class="dock-txt"><span class="k">Guardar el ejercicio</span><span class="v" id="sh-sum">${sumTxt()}</span></div>
+        <button class="dock-ok" data-save aria-label="Guardar el ejercicio">${ICON.ok}</button></div></div>
     </div></div>`;
   } else {
     const s = W[sheet.w - 1], di = s.dias.findIndex(d => d.id === sheet.did);
-    html = `<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sh-t"><div class="sheet-in">
+    html = `<div class="sheet${primera ? " entra" : ""}" role="dialog" aria-modal="true" aria-labelledby="sh-h"><div class="sheet-in">
       <div class="sheet-top"><button class="back" data-sheet-close aria-label="Volver">${ICON.back}</button>
-        <div class="top-txt"><span class="eyebrow">S${s.w} · D${di + 1} · ejercicio extra</span><h1 id="sh-t">Añadir extra</h1></div></div>
+        <div class="top-txt"><span class="eyebrow">S${s.w} · D${di + 1} · fuera del plan</span><h1 id="sh-h">Ejercicio extra</h1></div></div>
       <div class="sheet-body">
         <label class="fl">Nombre<input class="inp" data-xn value="${esc(sheet.nombre)}" placeholder="Ej. curl de muñeca"></label>
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <div class="sets-h"><span></span><span>KILOS</span><span>REPS</span><span>RPE</span></div>
-          <div id="sets" style="display:flex;flex-direction:column;gap:8px">${setsHtml({kg: "", reps: "", rpe: ""})}</div>
-        </div>
+        <div class="sets-x"><div class="sets-h"><span></span><span>KG</span><span>REPS</span><span>RPE</span></div>
+          <div id="sets">${setsHtml({kg: "", reps: "", rpe: ""})}</div></div>
+        <button class="btn ghost" data-add-set>Añadir serie</button>
+        <p class="small mut">Los extras se guardan en el día, pero no mueven tu progresión ni el volumen del plan.</p>
       </div>
-      <div class="sheet-foot"><div class="sum"><span class="mono" id="sh-sum">${sumTxt()}</span></div><button class="btn pri" data-save-extra>Guardar</button></div>
+      <div class="sheet-foot pie"><span class="mono mut" id="sh-sum">${sumTxt()}</span><button class="btn pri" data-save-extra>Guardar</button></div>
     </div></div>`;
   }
   $("#sheet-root").innerHTML = html;
+  const nuevo = $(".sheet-body"); if (nuevo && !primera) nuevo.scrollTop = scroll;
+  renderDock();
 }
+/* Cambios chicos en la hoja (pasos, RPE, escribir) sin redibujarla: no se pierde el foco ni la posición. */
+function refrescarSheet(forzar) {
+  if (!sheet || sheet.tipo !== "reg") return;
+  const r = sheet.rows[sheet.sel], ph = placeholders();
+  ["kg", "reps"].forEach(fld => { const i = document.querySelector(`.foco [data-f="${fld}"]`); if (i && (forzar || document.activeElement !== i)) i.value = r[fld]; });
+  document.querySelectorAll(".foco [data-rpe]").forEach(b => b.setAttribute("aria-pressed", String(String(r.rpe) !== "" && +b.dataset.rpe === +r.rpe)));
+  const t = $("#tabla-series"); if (t) t.innerHTML = tablaSeries(ph);
+  const sm = $("#sh-sum"); if (sm) sm.textContent = sumTxt();
+}
+function refrescarSets() { $("#sets").innerHTML = setsHtml({kg: "", reps: "", rpe: ""}); $("#sh-sum").textContent = sumTxt(); }
 function leerSets() {
   const ph = sheet.tipo === "reg" ? placeholders() : {kg: "", reps: "", rpe: ""};
   return sheet.rows.map(r => {
-    if (String(r.kg).trim() === "" && String(r.reps).trim() === "" && String(r.rpe).trim() === "") return null;
+    if (filaVacia(r)) return null;
     const k = num(r.kg) ?? num(ph.kg) ?? 0, reps = num(r.reps) ?? num(ph.reps) ?? 0, rpe = num(r.rpe);
     return {kg: k, reps, rpe: rpe == null ? null : rpe};
   }).filter(Boolean);
@@ -1094,6 +1268,22 @@ function hechoSheet() {
   const o = opcionesHecho(it).find(o => o[0] === sheet.hid) || [it.ex];
   return {id: o[0], n: o[0] === it.ex ? nombrePlan(it) : o[1]};
 }
+const siguienteNum = (fld, base, d, it, n) => fld === "kg" ? Math.max(0, Math.round((base + d * incKg(it, n)) * 100) / 100) : Math.max(0, Math.round(base) + d);
+function pasoNum(fld, d) {
+  if (sheet && sheet.tipo === "reg") {
+    const row = sheet.rows[sheet.sel], ph = placeholders();
+    row[fld] = numTxt(siguienteNum(fld, num(row[fld]) ?? num(ph[fld]) ?? 0, d, sheet.it, hechoSheet().n));
+    refrescarSheet(true); return;
+  }
+  const it = itemEdit(); if (!it) return;
+  edit[fld] = siguienteNum(fld, num(edit[fld]) ?? 0, d, it, hechoDe((LOG[edit.w] || {})[edit.key], it).n);
+  const i = $(`#v-hoy [data-ed="${fld}"]`); if (i) i.value = numTxt(edit[fld]);
+  pintarEditor();
+}
+function elegirRpe(v) {
+  if (sheet && sheet.tipo === "reg") { const row = sheet.rows[sheet.sel]; row.rpe = num(row.rpe) === v ? "" : numTxt(v); refrescarSheet(true); return; }
+  if (edit) { edit.rpe = edit.rpe != null && +edit.rpe === v ? null : v; pintarEditor(); }
+}
 function guardarSheet(modo) {
   const it = sheet.it, w = sheet.w, key = sheet.key;
   const base = {v: 2, t: Date.now(), plan: {id: it.ex, n: nombrePlan(it)}};
@@ -1101,9 +1291,8 @@ function guardarSheet(modo) {
   let entry;
   if (modo === "omit") entry = Object.assign(base, {hecho: hechoSheet(), sets: [], omitido: true});
   else if (modo === "igual") {
-    const n = it.k === "single" || it.k === "amrap" ? 1 : +it.sets || 1;
     const k = +cargaSugerida(W[w - 1], it, it.ex) || 0, reps = it.k === "amrap" ? 0 : it.k === "single" ? 1 : rango(it.reps)[0];
-    entry = Object.assign(base, {hecho: {id: it.ex, n: nombrePlan(it)}, sets: Array.from({length: n}, () => ({kg: k, reps, rpe: null})), igual: true});
+    entry = Object.assign(base, {hecho: {id: it.ex, n: nombrePlan(it)}, sets: Array.from({length: nSeries(it)}, () => ({kg: k, reps, rpe: null})), igual: true});
   } else {
     const sets = leerSets();
     if (!sets.length) { toast("Anota al menos una serie, o usa «Igual al plan» o «No lo hice»."); return; }
@@ -1111,6 +1300,11 @@ function guardarSheet(modo) {
   }
   if (com) entry.com = com;
   guardarEntrada(w, key, entry, it);
+  if (edit && edit.w === w && edit.key === key) {
+    const s = W[w - 1], d = s.dias.find(x => x.id === key.split(":")[0]);
+    if (entry.omitido || entry.sets.length >= nSeries(it)) ui.abierto = d ? pendienteDelDia(s, d) : null;
+    edit = ui.abierto ? nuevoEdit(w, ui.abierto) : null;
+  }
   const h = entry.hecho, pr = PROG[h.id];
   cerrarSheet();
   toast(entry.omitido ? "Anotado: no lo hiciste." : it.k === "acc" && pr && pr.w === w ? `Guardado. Próxima vez: ${kg(pr.next)}.` : "Guardado.");
@@ -1132,6 +1326,7 @@ function autoDia() {
   const s = W[ui.week - 1], log = LOG[s.w] || {};
   const i = s.dias.findIndex(d => itemsEj(d).some(it => !registrado(log[claveDe(d.id, it)])));
   ui.day = i >= 0 ? i : 0;
+  ui.abierto = undefined;
 }
 function render() {
   if (!DATA) return;
@@ -1145,11 +1340,12 @@ function render() {
   else if (ui.tab === "semana") renderSemana();
   else if (ui.tab === "ano") renderAno();
   else renderMas();
+  renderDock();
 }
 function irSemana(w) {
   ui.week = Math.max(1, Math.min(52, w));
   ui.dayTouched = true;
-  if (ui.week === st.actual) autoDia(); else ui.day = 0;
+  if (ui.week === st.actual) autoDia(); else { ui.day = 0; ui.abierto = undefined; }
   saveStore();
   cargarSemana(ui.week);
   render();
@@ -1158,7 +1354,7 @@ function irSemana(w) {
 let toastT = null;
 function toast(msg) {
   const r = $("#toast-root");
-  r.innerHTML = `<div class="toast">${esc(msg)}</div>`;
+  r.innerHTML = `<div class="toast" role="status">${esc(msg)}</div>`;
   clearTimeout(toastT); toastT = setTimeout(() => { r.innerHTML = ""; }, 2600);
 }
 function exportar() {
@@ -1175,19 +1371,39 @@ document.addEventListener("click", async e => {
   const t = e.target.closest("button, [data-goweek]");
   if (!t) return;
   const ds = t.dataset;
-  if (ds.tab) { ui.tab = ds.tab; render(); window.scrollTo(0, 0); return; }
+  if (ds.tab) { ui.tab = ds.tab; ui.dockCtl = false; render(); window.scrollTo(0, 0); return; }
   if (t.id === "sync") { ui.tab = "mas"; ui.mas = "datos"; render(); window.scrollTo(0, 0); return; }
   if (ds.step) return irSemana(ui.week + Number(ds.step));
   if ("today" in ds) return irSemana(st.actual);
   if (ds.goweek) { ui.tab = "hoy"; return irSemana(Number(ds.goweek)); }
-  if (ds.day) { ui.day = Number(ds.day); ui.dayTouched = true; render(); return; }
+  if (ds.goday !== undefined) { ui.tab = "hoy"; ui.day = Number(ds.goday); ui.dayTouched = true; ui.abierto = undefined; render(); window.scrollTo(0, 0); return; }
+  if (ds.day !== undefined) { ui.day = Number(ds.day); ui.dayTouched = true; ui.abierto = undefined; render(); return; }
+  if (ds.abrir) {
+    if (ui.abierto === ds.abrir) { ui.abierto = null; edit = null; }
+    else { ui.abierto = ds.abrir; edit = nuevoEdit(ui.week, ds.abrir); }
+    ui.dockCtl = false; render(); return;
+  }
+  if (ds.editset !== undefined && edit) { edit = nuevoEdit(edit.w, edit.key, Number(ds.editset)); render(); return; }
+  if (ds.stp) return pasoNum(ds.stp, Number(ds.d));
+  if (ds.rpe) return elegirRpe(Number(ds.rpe));
+  if ("guardarset" in ds) return guardarSerie();
+  if ("anillo" in ds) { ui.dockCtl = !ui.dockCtl; if (sheet) renderSheet(); else renderDock(); return; }
+  if (ds.selrow !== undefined && sheet) { sheet.sel = Number(ds.selrow); renderSheet(); return; }
   if (ds.open) return abrirRegistro(ui.week, ds.open);
   if (ds.extraOpen) return abrirExtra(ds.extraOpen);
   if (ds.mas) { ui.mas = ds.mas; saveStore(); render(); return; }
+  if (ds.tema) { tema.modo = ds.tema; guardarTema(); renderMas(); return; }
   if (ds.av) { ui.av = ds.av; ui.avPt = null; renderAno(); return; }
-  if (ds.tmas) { if (descansoT) { descansoT.fin = Math.max(Date.now() + 5000, descansoT.fin + Number(ds.tmas) * 1000); guardarDescanso(); tickDescanso(); } return; }
+  if (ds.tmas) {
+    if (descansoT) { descansoT.fin = Math.max(Date.now() + 5000, descansoT.fin + Number(ds.tmas) * 1000); descansoT.total = Math.max(descansoT.total || 0, quedan()); guardarDescanso(); tickDescanso(); }
+    return;
+  }
   if ("tstop" in ds) return pararDescanso();
-  if ("descanso" in ds && sheet && sheet.it) return iniciarDescanso(segundosDescanso(descanso(sheet.it)), nombrePlan(sheet.it));
+  if ("descanso" in ds) {
+    const it = sheet && sheet.it ? sheet.it : itemEdit();
+    if (it) { ui.dockCtl = false; iniciarDescanso(segundosDescanso(descanso(it)), nombrePlan(it)); if (sheet) renderSheet(); }
+    return;
+  }
   if (ds.delx) {
     const w = ui.week, k = "x~" + ds.delx, i = Number(ds.i);
     if (!LOG[w] || !LOG[w][k]) return;
@@ -1202,8 +1418,16 @@ document.addEventListener("click", async e => {
   }
   if (ds.actual) { st.actual = Number(ds.actual); dirty.estado = marca(); pedirGuardado(300); render(); toast(`La semana ${st.actual} es ahora la actual.`); return; }
   if ("sheetClose" in ds) return cerrarSheet();
-  if ("addSet" in ds) { const l = sheet.rows[sheet.rows.length - 1] || {kg: "", reps: "", rpe: ""}; sheet.rows.push({kg: l.kg, reps: l.reps, rpe: ""}); refrescarSets(); return; }
-  if ("delSet" in ds) { if (sheet.rows.length > 1) { sheet.rows.pop(); refrescarSets(); } return; }
+  if ("addSet" in ds) {
+    const l = sheet.rows[sheet.rows.length - 1] || {kg: "", reps: "", rpe: ""};
+    sheet.rows.push({kg: l.kg, reps: l.reps, rpe: ""});
+    if (sheet.tipo === "reg") { sheet.sel = sheet.rows.length - 1; renderSheet(); } else refrescarSets();
+    return;
+  }
+  if ("delSet" in ds) {
+    if (sheet.rows.length > 1) { sheet.rows.pop(); sheet.sel = Math.min(sheet.sel, sheet.rows.length - 1); if (sheet.tipo === "reg") renderSheet(); else refrescarSets(); }
+    return;
+  }
   if ("igual" in ds) return guardarSheet("igual");
   if ("omit" in ds) return guardarSheet("omit");
   if ("save" in ds) return guardarSheet("normal");
@@ -1220,15 +1444,15 @@ document.addEventListener("click", async e => {
     return;
   }
 });
-function refrescarSets() {
-  const ph = sheet.tipo === "reg" ? placeholders() : {kg: "", reps: "", rpe: ""};
-  $("#sets").innerHTML = setsHtml(ph);
-  $("#sh-sum").textContent = sumTxt();
-}
 const _deb = {};
 document.addEventListener("input", e => {
   const t = e.target;
-  if (sheet && t.dataset.f) { sheet.rows[Number(t.dataset.i)][t.dataset.f] = t.value; $("#sh-sum").textContent = sumTxt(); return; }
+  if (!sheet && t.dataset.ed && edit) { edit[t.dataset.ed] = t.value; pintarBarra(); return; }
+  if (sheet && t.dataset.f) {
+    sheet.rows[Number(t.dataset.i)][t.dataset.f] = t.value;
+    if (sheet.tipo === "reg") { const tb = $("#tabla-series"); if (tb) tb.innerHTML = tablaSeries(placeholders()); }
+    $("#sh-sum").textContent = sumTxt(); return;
+  }
   if (sheet && "otro" in t.dataset) { sheet.otro = t.value; return; }
   if (sheet && "com" in t.dataset) { sheet.com = t.value; return; }
   if (sheet && "xn" in t.dataset) { sheet.nombre = t.value; return; }
@@ -1259,10 +1483,12 @@ document.addEventListener("change", e => {
   }
   if (sheet && "hecho" in t.dataset) {
     sheet.hid = t.value;
-    $("#otro-wrap").hidden = t.value !== "otro";
-    if (t.value === "otro") $("[data-otro]").focus();
-    refrescarSets(); return;
+    renderSheet();
+    if (t.value === "otro") { const o = $("[data-otro]"); if (o) o.focus(); }
+    return;
   }
+  if (t.dataset.temaClaro !== undefined) { tema.claro = t.value; guardarTema(); return; }
+  if (t.dataset.temaOscuro !== undefined) { tema.oscuro = t.value; guardarTema(); return; }
   if (t.dataset.rm) {
     const i = Number(t.dataset.rm); st.rm[i] = st.rm[i] || {};
     st.rm[i][t.dataset.lift] = t.value.trim().replace(",", ".");
@@ -1272,7 +1498,16 @@ document.addEventListener("change", e => {
   if ("ck" in t.dataset) actualizarChecklist();
   else if (t.id === "c-rpe") actualizarCalc();
 });
-document.addEventListener("keydown", e => { if (e.key === "Escape" && sheet) cerrarSheet(); });
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && sheet) { cerrarSheet(); return; }
+  // en Hoy, Enter en los kilos pasa a las reps; Enter en las reps guarda la serie
+  const t = e.target;
+  if (e.key === "Enter" && t.dataset && t.dataset.ed && edit && !sheet) {
+    e.preventDefault();
+    if (t.dataset.ed === "kg") { const r = $('#v-hoy [data-ed="reps"]'); if (r) r.focus(); }
+    else guardarSerie();
+  }
+});
 window.addEventListener("online", () => enCola(flush));
 // Con la app abierta, cada 90 s revisa si hay registros nuevos o comentarios de Claude.
 setInterval(() => {
@@ -1287,13 +1522,13 @@ document.addEventListener("visibilitychange", () => {
 
 /* ── inicio ── */
 (async function inicio() {
+  aplicarTema();
   readStore();
   try {
     const r = await fetch("data/plan.json", {cache: "no-cache"});
     DATA = await r.json();
   } catch (e) {
-    $("#h-title").textContent = "No pude cargar el plan";
-    $("#h-sub").textContent = "Abre la app con señal una vez para guardarla en el teléfono.";
+    $("#v-hoy").innerHTML = `<div class="titulo"><h1>No pude cargar el plan</h1><p class="sub">Abre la app con señal una vez para guardarla en el teléfono.</p></div>`;
     return;
   }
   W = DATA.semanas; G = DATA.grupos; P64 = DATA.p64;

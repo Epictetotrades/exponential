@@ -3,11 +3,25 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#111214">
-<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#efebe3">
+<meta name="color-scheme" content="light dark">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>Exponential</title>
+<script>
+/* El tema se aplica antes de pintar para que la app no parpadee con otro color. */
+(function () {
+  var fondo = {hueso: "#efebe3", grafito: "#111214", papel: "#f4f1ea", onix: "#0a0a0b", niebla: "#e7e8ea"}, id = "hueso";
+  try {
+    var t = JSON.parse(localStorage.getItem("exp-tema") || "null") || {}, m = t.modo || "hueso";
+    var oscuro = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    id = m === "auto" ? (oscuro ? (t.oscuro || "grafito") : (t.claro || "hueso")) : m;
+    if (!fondo[id]) id = "hueso";
+  } catch (e) {}
+  document.documentElement.setAttribute("data-tema", id);
+  document.querySelector('meta[name="theme-color"]').setAttribute("content", fondo[id]);
+})();
+</script>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -20,14 +34,10 @@
 <div class="app">
   <header class="top">
     <div class="top-row">
-      <div class="top-txt">
-        <span class="eyebrow" id="h-eyebrow">Exponential</span>
-        <h1 id="h-title">Cargando tu plan…</h1>
-        <span class="sub" id="h-sub"></span>
-      </div>
+      <span class="eyebrow" id="h-eyebrow">Exponential</span>
       <button class="sync-btn" id="sync" data-s="local" aria-label="Estado de sincronización"><span class="sync-dot"></span><span id="sync-txt">Local</span></button>
     </div>
-    <div id="h-extra"></div>
+    <div class="cinta" id="cinta" role="img" aria-label="El año en 52 semanas"></div>
   </header>
 
   <main>
@@ -38,21 +48,17 @@
   </main>
 </div>
 
+<div id="dock-root"></div>
 <nav class="nav" aria-label="Secciones">
   <div class="nav-in">
-    <button data-tab="hoy" aria-current="page">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 8v8M18 8v8M3 10v4M21 10v4M6 12h12"/></svg>Hoy</button>
-    <button data-tab="semana">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>Semana</button>
-    <button data-tab="ano">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg>Año</button>
-    <button data-tab="mas">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg>Más</button>
+    <button data-tab="hoy" aria-current="page">Hoy<i></i></button>
+    <button data-tab="semana">Semana<i></i></button>
+    <button data-tab="ano">Año<i></i></button>
+    <button data-tab="mas">Más<i></i></button>
   </div>
 </nav>
 
 <div id="sheet-root"></div>
-<div id="timer-root"></div>
 <div id="toast-root" aria-live="polite"></div>
 
 <script src="app.js"></script>
