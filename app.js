@@ -4,10 +4,12 @@
    teléfono al instante y se suben a tu repositorio privado de GitHub cuando hay señal.
    Formato de los registros: igual que en el artefacto anterior (wNN = {e: {"d3:remo": {...}}}). */
 
-/* ── versión: súbela en cada publicación (y la etiqueta vX.Y en git) ── */
+/* ── versión: súbela en cada publicación (y la etiqueta vX.Y en git). Después de x.9 sigue (x+1).0:
+   «1.10» se lee 1,1 y parece anterior a la 1.9. ── */
 const VERSIONES = [
-  {n: "1.11", nombre: "RPE 5 y atrás", fecha: "15 oct 2026", txt: "El RPE va de 5 a 10 (el plan pide 5–7 en intros y descargas), en botones más grandes; el botón «atrás» del teléfono cierra el registro en vez de salir de la app."},
-  {n: "1.10", nombre: "Guardado reforzado", fecha: "15 oct 2026", txt: "Lo que vas anotando sin confirmar (la serie en curso y el registro completo) se guarda al instante en el teléfono: si Android cierra la app, al volver sigue ahí. Notas y peso se guardan sin esperar, y al salir de la app se sube lo pendiente."},
+  {n: "2.2", nombre: "Ocho mejoras", fecha: "15 oct 2026", txt: "Pantalla encendida al entrenar, calentamiento de p.224, discos por lado, re-test de la S14 en Semana, registro por lado (búlgara y copenhagen), medidas en Año, historial por ejercicio y volumen hecho contra el plan con la tabla de p.214. Las RPE de varias series se separan con «/» (8 / 8,5), para no confundirlas con decimales."},
+  {n: "2.1", nombre: "RPE 5 y atrás", fecha: "15 oct 2026", txt: "El RPE va de 5 a 10 (el plan pide 5–7 en intros y descargas), en botones más grandes; el botón «atrás» del teléfono cierra el registro en vez de salir de la app."},
+  {n: "2.0", nombre: "Guardado reforzado", fecha: "15 oct 2026", txt: "Lo que vas anotando sin confirmar (la serie en curso y el registro completo) se guarda al instante en el teléfono: si Android cierra la app, al volver sigue ahí. Notas y peso se guardan sin esperar, y al salir de la app se sube lo pendiente."},
   {n: "1.9", nombre: "Revisión", fecha: "15 oct 2026", txt: "Volver a la app desde otra ya no cambia el ejercicio abierto ni borra lo que llevabas escrito; el fin del descanso no cierra el teclado en el registro."},
   {n: "1.8", nombre: "Línea y temas", fecha: "15 oct 2026", txt: "Diseño nuevo: Hoy como línea con la serie en curso y una barra de descanso que guarda la serie; registro completo en foco; Semana como planilla; la cinta del año arriba; 5 temas con modo automático."},
   {n: "1.7", nombre: "Máximo fiable", fecha: "15 oct 2026", txt: "El máximo se estima solo con series de poco margen hasta el fallo: una descarga a RPE 6 ya no propone bajarlo, y un re-test a RPE 8–9 sí cuenta."},
@@ -35,6 +37,7 @@ const ICON = {
   ok: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
   x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg>',
   ajustes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>',
+  hist: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19h16M6 15l4-5 4 3 4-6"/></svg>',
 };
 
 /* ── constantes del plan ── */
@@ -94,7 +97,7 @@ const ALT = {
 
 /* ── estado local ── */
 const STORE = "exp-app-v1", CFG = "exp-cfg-v1";
-let st = {actual: 13, rm: [{}, {}, {}, {}, {}], jalon: "", peso: ""};
+let st = {actual: 13, rm: [{}, {}, {}, {}, {}], jalon: "", peso: "", medidas: []};
 let LOG = {}, PROG = {};
 let CLAUDE = {};  // comentarios de Claude por semana: claude/wNN.json → {"d2:femoral": {txt}, "dia~d6": {txt}, "semana": {txt}}
 /* Cada cambio pendiente guarda una marca única: si llega otro cambio mientras se sube el anterior,
@@ -105,7 +108,7 @@ let seq = Date.now();
 const marca = () => ++seq;
 let cfg = {owner: "Epictetotrades", repo: "exponential-datos", token: ""};
 let lastSync = null;
-const ui = {tab: "hoy", week: 13, day: 0, mas: "bloques", dayTouched: false, av: "banca", avPt: null, abierto: undefined, dockCtl: false};
+const ui = {tab: "hoy", week: 13, day: 0, mas: "bloques", dayTouched: false, av: "banca", avPt: null, abierto: undefined, dockCtl: false, calor: {}, rt: {}};
 
 /* ── tema: se guarda en este teléfono. «auto» sigue el modo claro u oscuro del sistema ── */
 const TEMAS = [
@@ -236,7 +239,7 @@ async function flush() {
     if (dirty.estado) {
       const v = dirty.estado;
       const r = await getFile("estado.json");
-      await putFile("estado.json", {rm: st.rm, jalon: st.jalon, actual: st.actual, peso: st.peso || ""}, r.sha);
+      await putFile("estado.json", {rm: st.rm, jalon: st.jalon, actual: st.actual, peso: st.peso || "", medidas: st.medidas || []}, r.sha);
       if (dirty.estado === v) dirty.estado = false;
     }
     if (dirty.prog) {
@@ -294,6 +297,7 @@ async function pull() {
       if (v.jalon != null) st.jalon = v.jalon;
       if (v.actual) st.actual = v.actual;
       if (v.peso != null) st.peso = v.peso;
+      if (Array.isArray(v.medidas)) st.medidas = v.medidas;
     }
     const p = await getFile("prog.json");
     if (p.data) {
@@ -458,11 +462,11 @@ function aplicarProgresion(w, it, entry, key) {
 }
 function resumen(sets) {
   if (!sets || !sets.length) return "";
-  const uno = x => (x.kg ? f(x.kg) + " × " : "") + (x.reps ?? "?") + (x.kg ? "" : " reps");
-  const iguales = sets.every(x => x.kg === sets[0].kg && x.reps === sets[0].reps);
+  const uno = x => (x.kg ? f(x.kg) + " × " : "") + (x.reps ?? "?") + (x.kg ? "" : " reps") + (x.lado ? (x.lado === "izq" ? " I" : " D") : "");
+  const iguales = !sets.some(x => x.lado) && sets.every(x => x.kg === sets[0].kg && x.reps === sets[0].reps);
   const rpes = sets.map(x => x.rpe).filter(x => x != null);
   const base = iguales ? `${uno(sets[0])} · ${sets.length} ${sets.length === 1 ? "serie" : "series"}` : sets.map(uno).join(" · ");
-  return base + (rpes.length ? ` · RPE ${rpes.map(f).join(", ")}` : "");
+  return base + (rpes.length ? ` · RPE ${rpes.map(f).join(" / ")}` : "");  // con «, » no se distingue 8, 8,5 de 8,8
 }
 /* S1–S10 se rediseñaron con la Pirámide cuando ya habían pasado: quedan como plantilla, no como pendientes. */
 const esPlantilla = w => w <= 10 && w < st.actual;
@@ -471,8 +475,7 @@ function estadoItem(s, it, prev) {
     if (prev.omitido) return ["omi", "No lo hice"];
     const h = hechoDe(prev, it);
     if (h.id !== it.ex) return ["cam", "Cambio"];
-    const n = it.k === "single" || it.k === "amrap" ? 1 : +it.sets || 1;
-    return prev.sets.length < n ? ["par", "Parcial"] : ["ok", "Hecho"];
+    return nHechas(prev, it) < nSeries(it) ? ["par", "Parcial"] : ["ok", "Hecho"];
   }
   if (esPlantilla(s.w)) return ["pend", "Plantilla"];
   if (s.w < st.actual) return ["fal", "Falta"];
@@ -529,7 +532,7 @@ function detalleTxt(s, it) {
     else if (it.desde) sub.push(it.desde.charAt(0).toUpperCase() + it.desde.slice(1) + (it.desde.startsWith("desde") ? " (convertida con la tabla de p.64)." : "."));
     else if (!it.pc) sub.push("Elige la carga que te deje en ese RPE.");
     if (it.aps) sub.push(`En par con ${it.aps}, ~1 min entre series (p.179).`);
-    if (it.lado) sub.push("Por lado: anota cada lado y empieza por el más débil.");
+    if (it.lado) sub.push("Por lado: anota cada lado por separado, empezando por el izquierdo.");
   }
   const a = ALT[it.ex];
   if (a) sub.push(`Si hoy no va: ${a.op.map(o => o[1]).join(" o ")}${a.c ? " — " + a.c : ""}. Elígela en «Hiciste» y carga por RPE.`);
@@ -552,15 +555,76 @@ function header() {
 }
 
 /* ── render: Hoy (el día como línea; el ejercicio en curso se registra ahí mismo) ── */
-const nSeries = it => it.k === "single" || it.k === "amrap" ? 1 : +it.sets || 1;
+// por lado (búlgara, copenhagen): las series del plan son por pierna, así que se anotan el doble
+const nSeries = it => it.k === "single" || it.k === "amrap" ? 1 : (+it.sets || 1) * (it.lado ? 2 : 1);
+/* Series anotadas. Hasta la 2.1, lo «por lado» se anotaba una vez por las dos piernas: esas series cuentan doble. */
+const nHechas = (p, it) => p && p.sets && !p.omitido ? p.sets.length * (it.lado && !p.sets.some(x => x.lado) ? 2 : 1) : 0;
 const esBasico = it => ["main", "single", "amrap"].includes(it.k);
 const incKg = (it, n) => esBasico(it) ? 2.5 : /mancuerna|laterales|posteriores|pájaros/i.test(n || it.n) ? 2 : 2.5;
 const RPES = [5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10];  // el plan va de RPE 5 (intro y descargas) a 10
 const corto = n => /Potencia/.test(n) ? "Potencia" : n.split(" · ")[0];
+
+/* Discos por lado, con barra olímpica de 20 kg. */
+const BARRA = 20, DISCOS = [25, 20, 15, 10, 5, 2.5, 1.25];
+const CON_BARRA = new Set(["banca", "sentadilla", "pausa", "peso_muerto", "cerrado", "remo", "rumano"]);
+function discos(kgv) {
+  const k = num(kgv); if (!(k >= BARRA)) return "";
+  let lado = (k - BARRA) / 2;
+  if (lado < 0.01) return "solo la barra";
+  const out = [];
+  for (const d of DISCOS) while (lado >= d - 1e-9) { out.push(d); lado -= d; }
+  return out.map(d => String(d).replace(".", ",")).join(" + ")  // f() redondea a 1 decimal: 1,25 saldría 1,3 + (lado > 0.01 ? ` (faltan ${f(lado)})` : "");
+}
+/* Calentamiento antes de la primera serie de trabajo, en % del peso de trabajo (p.224). */
+function calentamiento(it, kgTrabajo, conBarra) {
+  const k = num(kgTrabajo); if (!(k > 0)) return [];
+  const pocas = it.k === "single" || rango(it.reps)[1] <= 5;
+  const pasos = pocas ? [[0, "5–10"], [.5, 5], [.6, 4], [.7, 3], [.8, 2], [.9, 1]] : [[.5, 8], [.7, 4], [.9, 2]];
+  return pasos.filter(([p]) => p || conBarra).map(([p, r]) => p ? `${f(r25(k * p))} × ${r}` : `Barra × ${r}`);
+}
+/* Series por músculo con la tabla de p.214: primario 1, secundario 0,5 (tu regla). La potencia no cuenta (p.139). */
+const SQ_LIBRE = {cuadriceps: 1, gluteo: 1, lumbar: 0.5}, SQ_MAQ = {cuadriceps: 1, gluteo: 1};
+const BISAGRA = {gluteo: 1, isquios: 1, lumbar: 1, trapecio: 0.5}, JALON = {dorsal: 1, biceps: 1, hombro_post: 0.5};
+const REMO = {dorsal: 1, trapecio: 1, hombro_post: 0.5, biceps: 0.5, hombro_lat: 0.5}, BANCA = {pecho: 1, hombro_ant: 1, triceps: 0.5};
+const INCL = {pecho: 1, hombro_ant: 1, triceps: 0.5, hombro_lat: 0.5}, CERR = {pecho: 1, hombro_ant: 1, triceps: 1};
+const MIL = {hombro_ant: 1, triceps: 1, hombro_lat: 0.5}, APER = {pecho: 1, hombro_ant: 0.5};
+const SOLO = g => ({[g]: 1});
+const MUSC = {
+  sentadilla: SQ_LIBRE, pausa: SQ_LIBRE, bulgara: SQ_LIBRE, zancadas: SQ_LIBRE, sent_safety: SQ_LIBRE,
+  prensa: SQ_MAQ, hack: SQ_MAQ, hack_pausa: SQ_MAQ, sent_smith: SQ_MAQ, bulgara_smith: SQ_MAQ, prensa_unilateral: SQ_MAQ,
+  rumano: BISAGRA, peso_muerto: BISAGRA, pm_hex: BISAGRA, hiper45: BISAGRA, ghd_cadera: BISAGRA, hipthrust_maq: {gluteo: 1, isquios: 0.5},
+  jalon: JALON, jalon_v: JALON, jalon_ancho: JALON, dominada_banda: JALON,
+  remo: REMO, remo_pecho: REMO, remo_polea: REMO,
+  banca: BANCA, press_pecho_maq: BANCA, banca_smith: BANCA, inclinado: INCL, inclinado_smith: INCL,
+  cerrado: CERR, cerrado_smith: CERR, militar: MIL, militar_smith: MIL, pecdeck: APER, aperturas_polea: APER,
+  laterales: SOLO("hombro_lat"), lateral_maq: SOLO("hombro_lat"), lateral_polea: SOLO("hombro_lat"),
+  posteriores: SOLO("hombro_post"), facepull: SOLO("hombro_post"), pajaros_inclinado: SOLO("hombro_post"), pecdeck_inv: SOLO("hombro_post"),
+  curl_z: SOLO("biceps"), martillo: SOLO("biceps"), predicador: SOLO("biceps"), curl_maq: SOLO("biceps"), martillo_polea: SOLO("biceps"), scott_mancuerna: SOLO("biceps"),
+  polea: SOLO("triceps"), frances: SOLO("triceps"), triceps_sobre_cabeza: SOLO("triceps"), frances_mancuernas: SOLO("triceps"), "otro:tricep_v_bar": SOLO("triceps"),
+  femoral: SOLO("isquios"), nordico_ghd: SOLO("isquios"), extension: SOLO("cuadriceps"), extension_polea: SOLO("cuadriceps"),
+  gemelo_pie: SOLO("gemelo"), gemelo_sent: SOLO("gemelo"), gemelo_smith: SOLO("gemelo"), gemelo_hack: SOLO("gemelo"), gemelo_prensa: SOLO("gemelo"),
+  abduccion: SOLO("gluteo"), abductor_maq: SOLO("gluteo"), abduccion_banda: SOLO("gluteo"),
+  copenhagen: {}, aductor_maq: {}, pallof: {}, pallof_banda: {},
+};
+function volumenSemana(s, hecho) {
+  const v = {}, log = LOG[s.w] || {};
+  s.dias.forEach(d => itemsEj(d).forEach(it => {
+    const p = log[claveDe(d.id, it)];
+    let n = nSeries(it), id = it.ex;
+    if (hecho) {
+      if (!registrado(p) || p.omitido) return;
+      n = nHechas(p, it);
+      const h = hechoDe(p, it).id; if (MUSC[h]) id = h;
+    }
+    if (it.lado) n /= 2;  // por lado: cada pierna cuenta sus series
+    Object.entries(MUSC[id] || MUSC[it.ex] || {}).forEach(([g, w]) => { v[g] = (v[g] || 0) + n * w; });
+  }));
+  return v;
+}
 function itemsEj(d) { return d.items.filter(it => ["main", "acc", "single", "amrap"].includes(it.k)); }
 function serieTxt(x) {
   const k = num(x.kg), r = x.reps === "" || x.reps == null ? "?" : x.reps;
-  return (k ? f(k) + " × " + r : r + " reps") + (x.rpe != null && x.rpe !== "" ? " · RPE " + f(+x.rpe) : "");
+  return (k ? f(k) + " × " + r : r + " reps") + (x.rpe != null && x.rpe !== "" ? " · RPE " + f(+x.rpe) : "") + (x.lado ? (x.lado === "izq" ? " · izq." : " · der.") : "");
 }
 function dayNav(s) {
   return `<nav class="dias" aria-label="Días">${s.dias.map((d, i) => {
@@ -578,14 +642,16 @@ function nuevoEdit(w, key, idx) {
   const sets = prev && prev.sets && !prev.omitido ? prev.sets : [];
   const i = idx == null ? sets.length : Math.min(idx, sets.length);
   const ref = sets[i] || sets[sets.length - 1];
+  const ultimo = sets.length ? sets[sets.length - 1].lado : null;  // por lado: alterna, empezando por la izquierda (tu plan)
   return {w, key, idx: i,
     kg: ref ? ref.kg : (cargaSugerida(s, it, hechoDe(prev, it).id) || ""),
     reps: ref ? ref.reps : it.k === "single" ? 1 : it.k === "amrap" ? "" : rango(it.reps)[0],
-    rpe: sets[i] && sets[i].rpe != null ? sets[i].rpe : null};
+    rpe: sets[i] && sets[i].rpe != null ? sets[i].rpe : null,
+    lado: it.lado ? (sets[i] ? sets[i].lado || "izq" : ultimo === "izq" ? "der" : "izq") : null};
 }
 function pendienteDelDia(s, d) {
   const log = LOG[s.w] || {};
-  const it = itemsEj(d).find(it => { const p = log[claveDe(d.id, it)]; return !registrado(p) || (!p.omitido && p.sets.length < nSeries(it)); });
+  const it = itemsEj(d).find(it => { const p = log[claveDe(d.id, it)]; return !registrado(p) || (!p.omitido && nHechas(p, it) < nSeries(it)); });
   return it ? claveDe(d.id, it) : null;
 }
 const numTxt = v => typeof v === "number" ? f(v) : String(v ?? "");
@@ -635,7 +701,17 @@ function itemRow(s, d, it) {
       ${prev && prev.com ? `<span class="cita">“${esc(prev.com)}”</span>` : ""}
     </button>${extra}</div></div>`;
   const sets = prev && prev.sets && !prev.omitido ? prev.sets : [];
-  const tags = [esBasico(it) ? "Básico" : it.prio ? "Prioridad" : "", "descanso " + descanso(it)].filter(Boolean).join(" · ");
+  const tags = [esBasico(it) ? "Básico" : it.prio ? "Prioridad" : "", it.lado ? "por lado" : "", "descanso " + descanso(it)].filter(Boolean).join(" · ");
+  const hh = hechoDe(prev, it), barra = CON_BARRA.has(hh.id);
+  // calentamiento (p.224): solo en los básicos y antes de la primera serie de trabajo
+  const pasos = it.k === "main" && !sets.length ? calentamiento(it, cargaSugerida(s, it, hh.id), barra) : [];
+  const listos = ui.calor[key] || [];
+  const calor = pasos.length ? `<div class="calor"><span class="k acc">Calentamiento · ${listos.length} de ${pasos.length} <span class="pg">p.224</span></span>
+      <div class="scs">${pasos.map((t, i) => `<button class="sc ${listos.includes(i) ? "hecha" : "nueva"}" data-calor="${esc(key)}" data-i="${i}" aria-pressed="${listos.includes(i)}">${listos.includes(i) ? ICON.ok : ""}${esc(t)}</button>`).join("")}</div>
+      <span class="hint">Sube por el 50 al 90 % de tu carga de trabajo. Toca cada uno al hacerlo; no se guarda como serie.</span></div>` : "";
+  const lados = it.lado ? `<div class="seg lado" style="--n:2;margin-top:0" role="group" aria-label="Pierna">${[["izq", "Izquierda"], ["der", "Derecha"]].map(([v, n]) => `<button data-lado="${v}" aria-pressed="${edit.lado === v}">${n}</button>`).join("")}</div>
+      ${sets.some(x => x.lado) ? `<span class="hint">Esta semana ·${["izq", "der"].map(l => `${l === "izq" ? "izquierda" : "derecha"}: ${sets.filter(x => x.lado === l).map(x => x.reps).join(", ") || "—"}`).join(" · ")} reps</span>` : ""}` : "";
+  const disc = barra && discos(edit.kg) ? `<div class="discos">Por lado: <b class="mono" id="discos-v">${esc(discos(edit.kg))}</b> · barra de 20 kg</div>` : "";
   const chips = sets.map((x, i) => `<button class="sc hecha${i === edit.idx ? " sel" : ""}" data-editset="${i}" aria-pressed="${i === edit.idx}" aria-label="Editar la serie ${i + 1}">${ICON.ok}${i + 1} · ${esc(serieTxt(x))}</button>`).join("")
     + `<button class="sc nueva${edit.idx === sets.length ? " sel" : ""}" data-editset="${sets.length}" aria-pressed="${edit.idx === sets.length}">${sets.length + 1} · ${edit.idx === sets.length ? "en curso" : "nueva"}</button>`;
   return `<div class="paso abierto ${cls}"><div class="riel"><i class="nodo"></i><s></s></div><div class="cuerpo">
@@ -644,10 +720,14 @@ function itemRow(s, d, it) {
         <span class="ex-h"><b class="nombre">${esc(it.n)}</b><span class="tag">${esc(tags)}</span></span>
         <span class="v">${esc(planTxt(s, it))}</span>
       </button>
+      ${calor}
       <div class="scs">${chips}</div>
+      ${lados}
       <div class="editor">${stepper("kg", edit.kg)}${stepper("reps", edit.reps)}</div>
+      ${disc}
       ${rpeHtml(edit.rpe)}
       <button class="link-row" data-open="${esc(key)}">${ICON.ajustes}<span>Variante, todas las series y comentario</span>${ICON.next}</button>
+      <button class="link-row" data-hist="${esc(hh.id)}" data-n="${esc(hh.n)}">${ICON.hist}<span>Historial de este ejercicio</span>${ICON.next}</button>
     </div>${extra}</div></div>`;
 }
 function renderHoy() {
@@ -655,14 +735,15 @@ function renderHoy() {
   if (ui.abierto === undefined) ui.abierto = s.w === st.actual ? pendienteDelDia(s, d) : null;
   if (ui.abierto && !(edit && edit.key === ui.abierto && edit.w === s.w)) edit = nuevoEdit(s.w, ui.abierto);
   if (!ui.abierto) edit = null;
-  const ej = itemsEj(d), regs = ej.map(it => log[claveDe(d.id, it)]).filter(registrado);
-  const series = regs.reduce((a, x) => a + (x.sets ? x.sets.length : 0), 0);
+  const ej = itemsEj(d);
+  const series = ej.reduce((a, it) => a + nHechas(log[claveDe(d.id, it)], it), 0);
   const plan = ej.reduce((a, it) => a + nSeries(it), 0);
   const extras = log["x~" + d.id] || [], nd = log["n~" + d.id], ncDia = (CLAUDE[s.w] || {})["dia~" + d.id];
   const ctx = s.w === st.actual ? "" : `<div class="ctx"><span>${esPlantilla(s.w) ? "Plantilla" : s.w < st.actual ? "Ya pasó" : "Por venir"} · S${s.w} · ${esc(etiqueta(s))}</span><button class="link-btn" data-today>Ir a la S${st.actual}</button></div>`;
   const sub = !ej.length ? `D${ui.day + 1} · sin ejercicios con series` : `D${ui.day + 1} · ${ej.length} ejercicios · ${series} de ${plan} series`;
   $("#v-hoy").innerHTML = `${ctx}${dayNav(s)}
     <div class="titulo"><h1>${esc(d.n)}</h1><p class="sub">${esc(sub)}</p></div>
+    ${edit && typeof navigator !== "undefined" && navigator.wakeLock ? `<div class="ctx pantalla"><span>Pantalla encendida mientras entrenas</span><button class="switch" role="switch" data-pantalla aria-checked="${pantallaOn()}" aria-label="Pantalla encendida mientras entrenas"><i></i></button></div>` : ""}
     ${ncDia && ncDia.txt ? `<div class="claude"><span class="k">CLAUDE · ESTE DÍA</span><p>${esc(ncDia.txt)}</p></div>` : ""}
     <div class="linea">${d.items.map(it => itemRow(s, d, it)).join("") || '<p class="mut">Día libre o de movilidad.</p>'}</div>
     ${extras.length ? `<h2>Extras</h2><div class="lista">${extras.map((x, i) => `<div class="row"><div class="ex-h"><b class="nombre">${esc(x.n)}</b><button class="btn quiet chico" data-delx="${d.id}" data-i="${i}">Borrar</button></div>
@@ -676,6 +757,7 @@ function pintarEditor() {
   const r = $("#v-hoy");
   ["kg", "reps"].forEach(fld => { const i = r.querySelector(`[data-ed="${fld}"]`); if (i && document.activeElement !== i) i.value = numTxt(edit[fld]); });
   r.querySelectorAll(".tarjeta [data-rpe]").forEach(b => b.setAttribute("aria-pressed", String(edit.rpe != null && +b.dataset.rpe === +edit.rpe)));
+  const dv = r.querySelector("#discos-v"); if (dv) dv.textContent = discos(edit.kg) || "—";
   pintarBarra();
   guardarBorrador();
 }
@@ -688,6 +770,7 @@ function guardarSerie() {
   const sets = prev && prev.sets && !prev.omitido ? prev.sets.slice() : [];
   const i = Math.min(edit.idx, sets.length);
   sets[i] = {kg: kgv ?? 0, reps, rpe: edit.rpe == null ? null : +edit.rpe};
+  if (it.lado) sets[i].lado = edit.lado || "izq";
   const entry = {v: 2, t: Date.now(), plan: {id: it.ex, n: nombrePlan(it)}, hecho: hechoDe(prev, it), sets};
   if (prev && prev.com) entry.com = prev.com;
   guardarEntrada(w, key, entry, it);
@@ -704,11 +787,34 @@ function guardarSerie() {
 }
 
 /* ── render: Semana (la semana entera como planilla) ── */
-function barras(vol) {
+/* Volumen por músculo: el plan (borde) y lo que anotaste (relleno); en rojo, donde faltan 2 series o más. */
+function barras(plan, hecho, marcar) {  // marcar: solo en semanas cerradas; a mitad de semana faltaría todo
+  const ancho = x => Math.min(100, x / 24 * 100).toFixed(1);
   return `<div class="vol">${G.map(g => {
-    const v = vol[g.id] || 0, w = Math.min(100, v / 24 * 100);
-    return `<div class="vr"><span>${esc(g.n)}</span><div class="track"><i class="band"></i><i class="fill${v >= 10 && v <= 20 ? " en" : ""}" style="width:${w}%"></i></div><span class="vn">${f(v)}</span></div>`;
+    const p = plan[g.id] || 0, h = hecho ? hecho[g.id] || 0 : null, falta = marcar && h != null && p - h >= 2;
+    return `<div class="vr${falta ? " falta" : ""}"><span>${esc(g.n)}</span><div class="track"><i class="band"></i>${h != null
+      ? `<i class="plan" style="width:${ancho(p)}%"></i><i class="fill${falta ? " en" : ""}" style="width:${ancho(h)}%"></i>`
+      : `<i class="fill${p >= 10 && p <= 20 ? " en" : ""}" style="width:${ancho(p)}%"></i>`}</div><span class="vn">${h != null ? `${f(h)}<small>/${f(p)}</small>` : f(p)}</span></div>`;
   }).join("")}</div>`;
+}
+/* Re-test del máximo al cierre de la semana (tu planificador: «Re-test 1RM» en la S14). */
+function retestHtml(s) {
+  if (!/Re-test 1RM/.test(s.nota || "")) return "";
+  const log = LOG[s.w] || {};
+  return `<h2>Re-test del máximo</h2>
+    <p class="small mut">Al cierre de la semana: sube por el 80 % × 2 y el 90 % × 1, como en el calentamiento <span class="pg">p.224</span>, y termina con un single a RPE 8–9, sin llegar al fallo <span class="pg">p.118</span>. El máximo nuevo recalcula las cargas de S15–S18.</p>
+    <div class="rt-l">${[["banca", "Press de banca"], ["sentadilla", "Sentadilla"]].map(([lift, n]) => {
+      const rm = rmDe(s.w, lift), x = log["rt~" + lift], b = ui.rt[lift] || {};
+      const est = x ? r05(e1rm({kg: x.kg, reps: 1, rpe: x.rpe})) : 0, rpe = b.rpe ?? (x ? x.rpe : null);
+      const paso = p => { const k = r25(rm * p); return `<div class="rt-p"><span class="k">${Math.round(p * 100)} %</span><span><b class="mono">${kg(k)} × ${p < 0.85 ? "2" : "1"}</b><span class="hint">por lado ${discos(k)}</span></span></div>`; };
+      return `<div class="rt"><div class="rt-h"><b>${n}</b><span class="mono mut">máximo actual ${f(rm)} kg</span></div>${paso(0.8)}${paso(0.9)}
+        <div class="rt-s"><span class="k acc">Single · RPE 8–9</span>
+          <div class="rt-in"><label class="fl">Kg<input class="inp mono" data-rtkg="${lift}" inputmode="decimal" value="${esc(b.kg ?? (x ? f(x.kg) : ""))}" placeholder="kg"></label>
+            <div class="rpe-g rt-rpe" role="group" aria-label="RPE del single">${[8, 8.5, 9].map(r => `<button data-rtrpe="${lift}" data-v="${r}" aria-pressed="${rpe === r}">${f(r)}</button>`).join("")}</div></div>
+          <button class="btn" data-rtsave="${lift}" data-w="${s.w}">Guardar el single</button>
+          ${x ? `<div class="prox"><span class="k">MÁXIMO</span><span>${f(x.kg)} × 1 a RPE ${f(x.rpe)} → ≈ <b class="mono">${kg(est)}</b> (tabla p.64).${Math.abs(est - rm) / rm >= 0.02 ? ` <button class="link-btn" data-setrm="${lift}" data-v="${est}" data-w="${s.w}">Usar ${kg(est)} como máximo</button>` : ""}</span></div>` : ""}
+        </div></div>`;
+    }).join("")}</div>`;
 }
 function renderSemana() {
   const s = W[ui.week - 1], log = LOG[s.w] || {}, c = ciclo(s), plantilla = esPlantilla(s.w);
@@ -720,7 +826,7 @@ function renderSemana() {
     const q = itemsEj(d).map(it => {
       const prev = log[claveDe(d.id, it)], [cls] = estadoItem(s, it, prev);
       tot++; pd += nSeries(it);
-      if (registrado(prev)) { hechos++; alguno = true; sd += prev.sets ? prev.sets.length : 0; if (prev.com) notas.push([`D${i + 1} · ${nombrePlan(it)}`, prev.com]); }
+      if (registrado(prev)) { hechos++; alguno = true; sd += nHechas(prev, it); if (prev.com) notas.push([`D${i + 1} · ${nombrePlan(it)}`, prev.com]); }
       else if (s.w <= st.actual && !plantilla) faltan.push(`D${i + 1} ${nombrePlan(it)}`);
       if (it.k === "main") lifts.push(`<div class="lift"><span class="k">D${i + 1} · ${esc(nombrePlan(it))}</span><span class="kg">${kg(r25(rmDe(s.w, it.lift) * it.pct / 100))}</span><span class="d">${it.sets} × ${it.reps} · RPE ${esc(it.rpe)}</span>${registrado(prev) && !prev.omitido ? `<span class="h">hecho ${esc(resumen(prev.sets))}</span>` : ""}</div>`);
       return `<i class="q ${cls}"></i>`;
@@ -741,6 +847,7 @@ function renderSemana() {
     ${nc && nc.txt ? `<div class="claude"><span class="k">CLAUDE · ESTA SEMANA</span><p>${esc(nc.txt)}</p></div>` : ""}
     ${plantilla ? `<p class="small mut" style="margin-top:12px">Esta semana se rediseñó con la Pirámide cuando ya había pasado, así que queda como plantilla: sirve de modelo para repetir el bloque, no tiene registros pendientes.</p>` : ""}
     ${!plantilla && s.w <= st.actual ? `<div class="stats"><div><span class="k">EJERCICIOS</span><span class="n">${hechos} <small>/ ${tot}</small></span></div><div><span class="k">SERIES</span><span class="n">${series} <small>/ ${plan}</small></span></div><div><span class="k">DÍAS</span><span class="n">${diasCon} <small>/ ${s.dias.length}</small></span></div></div>` : ""}
+    ${retestHtml(s)}
     <h2>La semana</h2>
     <p class="small mut">Cada cuadro es un ejercicio; a la derecha, series anotadas sobre las del plan. Toca un día para abrirlo.</p>
     <div class="sem">${filas}</div>
@@ -749,8 +856,8 @@ function renderSemana() {
     ${notas.length ? `<h2>Tus notas</h2><div class="notas-l">${notas.map(([t, x]) => `<div class="nota-i"><span class="k">${esc(t)}</span><p>“${esc(x)}”</p></div>`).join("")}</div>` : ""}
     ${faltan.length ? `<h2>Sin registrar · ${faltan.length}</h2><div class="chips">${faltan.map(x => `<span class="pill fal">${esc(x)}</span>`).join("")}</div>` : ""}
     <h2>Volumen ${s.w === st.actual ? "de esta semana" : "de la semana"}</h2>
-    <p class="small mut">Series del plan por músculo: directas 1, indirectas 0,5. La franja es el rango 10–20 <span class="pg">p.62</span>. El día de potencia no cuenta <span class="pg">p.139</span>.</p>
-    ${barras(s.vol)}
+    <p class="small mut">Series por músculo con la tabla de <span class="pg">p.214</span>: primario 1, secundario 0,5 (tu regla). ${!plantilla && s.w <= st.actual ? `El borde es el plan; el relleno, lo que anotaste.${s.w < st.actual ? " En color, donde faltaron 2 series o más." : ""} ` : ""}La franja es el rango 10–20 <span class="pg">p.62</span>. El día de potencia no cuenta <span class="pg">p.139</span>.</p>
+    ${barras(volumenSemana(s, false), !plantilla && s.w <= st.actual ? volumenSemana(s, true) : null, s.w < st.actual)}
     ${s.w !== st.actual ? `<div class="acciones"><button class="btn" data-actual="${s.w}">Marcar la semana ${s.w} como actual</button></div>` : ""}`;
 }
 
@@ -775,6 +882,23 @@ function metaBanca() {
     <div class="kpi"><span class="k">S52 RITMO DEL LIBRO</span><div class="n">≈ ${kg(r25(libro))}</div><div class="d">+2,5 kg cada ~5 semanas, intermedio (p.111) → ≈ ${reps(libro)} reps</div></div>
   </div>
   <p class="small mut" style="margin-top:10px">Veinte repeticiones con 100 kg quedan fuera de la tabla del libro, que llega a 11–12 reps al 70 % <span class="pg">p.64</span>. Es meta de varios años: se mide en cada test con un AMRAP a 100 kg.${hechos.length ? " Registrado: " + hechos.join(" · ") + "." : ""}</p>`;
+}
+/* Medidas: tu meta es +2 cm en brazos y hombros, manteniendo el pecho. Se guardan en tu cuenta con el estado. */
+const MEDIDAS = [["brazo", "Brazo"], ["hombros", "Hombros"], ["pecho", "Pecho"], ["cintura", "Cintura"], ["muslo", "Muslo"]];
+const fechaTxt = iso => { try { return new Date(iso + "T12:00:00").toLocaleDateString("es", {day: "numeric", month: "short", year: "numeric"}); } catch (e) { return iso; } };
+function medidasHtml() {
+  const M = st.medidas || [], ult = M[M.length - 1], pri = M[0];
+  const fila = (id, n, meta) => {
+    const v = ult ? num(ult[id]) : null, v0 = pri ? num(pri[id]) : null, d = v != null && v0 != null && M.length > 1 ? v - v0 : null;
+    return `<div class="kpi"><span class="k">${n} · ${meta ? "meta +2 cm" : "mantener"}</span><div class="n">${v != null ? f(v) + " cm" : "—"}</div>${d != null
+      ? `<div class="d">${d >= 0 ? "+" : ""}${f(d)} cm desde el ${esc(fechaTxt(pri.f))}${meta ? ` · ${Math.max(0, Math.min(100, Math.round(d / 2 * 100)))} % de la meta` : ""}</div>`
+      : `<div class="d">${M.length ? "Con una segunda medición verás el cambio." : "Aún sin medir."}</div>`}</div>`;
+  };
+  return `<div class="kpis">${fila("brazo", "Brazo", true)}${fila("hombros", "Hombros", true)}${fila("pecho", "Pecho", false)}</div>
+    <div class="med">${MEDIDAS.map(([id, n]) => `<label class="fl">${n} (cm)<input class="inp mono" data-med="${id}" inputmode="decimal" placeholder="cm"></label>`).join("")}</div>
+    <div class="acciones"><button class="btn pri" data-medida>Guardar medición de hoy</button></div>
+    <p class="small mut" style="margin-top:10px">Mide siempre en las mismas condiciones y en el mismo punto. El peso se anota en Más › Reglas.</p>
+    ${M.length ? `<div class="tw"><table><thead><tr><th>Fecha</th>${MEDIDAS.map(([, n]) => `<th class="n">${n}</th>`).join("")}</tr></thead><tbody>${M.slice().reverse().map(m => `<tr><td class="mono">${esc(fechaTxt(m.f))}</td>${MEDIDAS.map(([id]) => `<td class="n">${num(m[id]) != null ? f(num(m[id])) : "—"}</td>`).join("")}</tr>`).join("")}</tbody></table></div>` : ""}`;
 }
 function tablaMaximos() {
   const rows = TRAMOS.map((t, i) => `<tr><td><b class="mono">${t.d}</b><br><span class="small mut">${t.s}</span></td>${LIFTS.map(([id]) => {
@@ -811,6 +935,7 @@ function renderAno() {
       <span><i class="sw" style="background:var(--f-test)"></i>Test</span>
     </div>
     <h2>Tu meta de banca</h2>${metaBanca()}
+    <h2>Medidas</h2>${medidasHtml()}
     <h2>Tus máximos</h2>
     <p class="small mut">Las cargas de cada tramo salen de estos números. Después de cada test, anota el resultado y las semanas siguientes se recalculan solas. Una casilla vacía usa la de arriba.</p>
     ${tablaMaximos()}
@@ -828,7 +953,10 @@ function cargarHistorial() {
   historialPedido = true;
   const faltan = [];
   for (let w = 1; w <= st.actual; w++) if (!loaded[w]) faltan.push(w);
-  Promise.all(faltan.map(w => cargarSemana(w))).then(() => { if (ui.tab === "ano" && !sheet && !editando()) render(); });
+  Promise.all(faltan.map(w => cargarSemana(w))).then(() => {
+    if (sheet && sheet.tipo === "hist") renderSheet();
+    else if (ui.tab === "ano" && !sheet && !editando()) render();
+  });
 }
 function serieAvance(lift) {
   const pts = [], sinRpe = [], margen = [];
@@ -846,6 +974,8 @@ function serieAvance(lift) {
         if (v && (!mejor || v > mejor.v)) mejor = {w, v, kg: x.kg, reps: x.reps, rpe: x.rpe};
       });
     }));
+    const rt = log["rt~" + lift];  // el single del re-test
+    if (rt) { hubo = true; conRpe = true; const v = e1rm({kg: rt.kg, reps: 1, rpe: rt.rpe}); if (v && (!mejor || v > mejor.v)) mejor = {w, v, kg: rt.kg, reps: 1, rpe: rt.rpe}; }
     if (mejor) pts.push(mejor); else if (conRpe) margen.push(w); else if (hubo) sinRpe.push(w);
   }
   return {pts, sinRpe, margen};
@@ -999,9 +1129,10 @@ function masBloques() {
     <div class="rule"><h3><i class="sw" style="background:${b.col}"></i>${esc(b.t)} <span class="small mut mono">${b.w}</span></h3><p>${esc(b.x)}</p></div>`).join("")}`).join("");
 }
 function masVolumen() {
+  const VP = W.map(s => volumenSemana(s, false));  // el mismo cálculo que Semana (p.214)
   const head = `<tr><th>Músculo</th>${W.map(s => `<th class="${s.w === 11 || s.w === 19 ? "sep" : ""}">S${s.w}</th>`).join("")}</tr>`;
-  const body = G.map(g => `<tr><td>${esc(g.n)}</td>${W.map(s => {
-    const v = s.vol[g.id] || 0;
+  const body = G.map(g => `<tr><td>${esc(g.n)}</td>${W.map((s, i) => {
+    const v = VP[i][g.id] || 0;
     const c = v < 10 ? "h-bajo" : v > 20 ? "h-sobre" : "h-en";
     return `<td class="${c}${s.w === 11 || s.w === 19 ? " sep" : ""}">${f(v)}</td>`;
   }).join("")}</tr>`).join("");
@@ -1150,10 +1281,12 @@ const filaVacia = r => String(r.kg ?? "").trim() === "" && String(r.reps ?? "").
 function abrirRegistro(w, key) {
   const it = itemDeClave(w, key); if (!it) return;
   const prev = LOG[w] && LOG[w][key];
-  const rows = [];
-  for (let i = 0; i < Math.max(nSeries(it), prev && prev.sets ? prev.sets.length : 0); i++) {
+  const rows = [], antiguo = !!(it.lado && prev && prev.sets && nHechas(prev, it) > prev.sets.length);  // anotado hasta la 2.1, por las dos piernas
+  for (let i = 0; i < (antiguo ? prev.sets.length : Math.max(nSeries(it), prev && prev.sets ? prev.sets.length : 0)); i++) {
     const v = (prev && prev.sets && prev.sets[i]) || {};
-    rows.push({kg: v.kg == null ? "" : numTxt(v.kg), reps: v.reps ?? "", rpe: v.rpe == null ? "" : numTxt(v.rpe)});
+    const fila = {kg: v.kg == null ? "" : numTxt(v.kg), reps: v.reps ?? "", rpe: v.rpe == null ? "" : numTxt(v.rpe)};
+    if (it.lado && !antiguo) fila.lado = v.lado || (i % 2 ? "der" : "izq");  // por lado: izquierda primero, como pide tu plan
+    rows.push(fila);
   }
   const hecho = hechoDe(prev, it), esOtro = !opcionesHecho(it).some(o => o[0] === hecho.id);
   const libre = rows.findIndex(filaVacia);
@@ -1201,7 +1334,8 @@ function tablaSeries(ph) {
   return `<div class="tabla-s"><div class="h"><span>SERIE</span><span>KG</span><span>REPS</span><span>RPE</span><span></span></div>
   ${sheet.rows.map((r, i) => {
     const c = (v, p) => String(v) === "" ? `<span class="ph">${esc(p === "" || p == null ? "—" : p)}</span>` : `<span>${esc(v)}</span>`;
-    return `<button class="fila${i === sheet.sel ? " sel" : ""}" data-selrow="${i}" aria-pressed="${i === sheet.sel}" aria-label="Serie ${i + 1}"><span>${i + 1}</span>${c(r.kg, ph.kg)}${c(r.reps, ph.reps)}${c(r.rpe, it.rpe || "")}${filaVacia(r) ? "<span></span>" : ICON.ok}</button>`;
+    const num1 = r.lado ? `${Math.floor(i / 2) + 1}${r.lado === "izq" ? " I" : " D"}` : String(i + 1);
+    return `<button class="fila${i === sheet.sel ? " sel" : ""}" data-selrow="${i}" aria-pressed="${i === sheet.sel}" aria-label="Serie ${num1}"><span>${num1}</span>${c(r.kg, ph.kg)}${c(r.reps, ph.reps)}${c(r.rpe, it.rpe || "")}${filaVacia(r) ? "<span></span>" : ICON.ok}</button>`;
   }).join("")}</div>`;
 }
 function grande(fld, r, ph) {
@@ -1231,7 +1365,7 @@ function renderSheet(primera) {
         <label class="fl">Hiciste<select class="inp" data-hecho>${ops.map(([id, nm]) => `<option value="${esc(id)}" ${id === sheet.hid ? "selected" : ""}>${esc(nm)}</option>`).join("")}<option value="otro" ${sheet.hid === "otro" ? "selected" : ""}>Otro…</option></select></label>
         <label class="fl" ${sheet.hid === "otro" ? "" : "hidden"} id="otro-wrap">¿Cuál?<input class="inp" data-otro value="${esc(sheet.otro)}" placeholder="Queda con este nombre"></label>
         <section class="foco" aria-label="Serie ${sheet.sel + 1}">
-          <span class="k acc">Serie ${sheet.sel + 1} · ${filaVacia(r) ? "en curso" : "editando"}</span>
+          <span class="k acc">Serie ${r.lado ? `${Math.floor(sheet.sel / 2) + 1} · ${r.lado === "izq" ? "izquierda" : "derecha"}` : sheet.sel + 1} · ${filaVacia(r) ? "en curso" : "editando"}</span>
           <div class="grandes">${grande("kg", r, ph)}<span class="por">×</span>${grande("reps", r, ph)}</div>
           ${rpeHtml(r.rpe)}
         </section>
@@ -1246,6 +1380,8 @@ function renderSheet(primera) {
         <div class="dock-txt"><span class="k">Guardar el ejercicio</span><span class="v" id="sh-sum">${sumTxt()}</span></div>
         <button class="dock-ok" data-save aria-label="Guardar el ejercicio">${ICON.ok}</button></div></div>
     </div></div>`;
+  } else if (sheet.tipo === "hist") {
+    html = histHtml(primera);
   } else {
     const s = W[sheet.w - 1], di = s.dias.findIndex(d => d.id === sheet.did);
     html = `<div class="sheet${primera ? " entra" : ""}" role="dialog" aria-modal="true" aria-labelledby="sh-h"><div class="sheet-in">
@@ -1265,6 +1401,7 @@ function renderSheet(primera) {
   const nuevo = $(".sheet-body"); if (nuevo && !primera) nuevo.scrollTop = scroll;
   renderDock();
   guardarBorrador();
+  pantalla();
 }
 /* Cambios chicos en la hoja (pasos, RPE, escribir) sin redibujarla: no se pierde el foco ni la posición. */
 function refrescarSheet(forzar) {
@@ -1282,7 +1419,9 @@ function leerSets() {
   return sheet.rows.map(r => {
     if (filaVacia(r)) return null;
     const k = num(r.kg) ?? num(ph.kg) ?? 0, reps = num(r.reps) ?? num(ph.reps) ?? 0, rpe = num(r.rpe);
-    return {kg: k, reps, rpe: rpe == null ? null : rpe};
+    const o = {kg: k, reps, rpe: rpe == null ? null : rpe};
+    if (r.lado) o.lado = r.lado;
+    return o;
   }).filter(Boolean);
 }
 function hechoSheet() {
@@ -1316,7 +1455,7 @@ function guardarSheet(modo) {
   if (modo === "omit") entry = Object.assign(base, {hecho: hechoSheet(), sets: [], omitido: true});
   else if (modo === "igual") {
     const k = +cargaSugerida(W[w - 1], it, it.ex) || 0, reps = it.k === "amrap" ? 0 : it.k === "single" ? 1 : rango(it.reps)[0];
-    entry = Object.assign(base, {hecho: {id: it.ex, n: nombrePlan(it)}, sets: Array.from({length: nSeries(it)}, () => ({kg: k, reps, rpe: null})), igual: true});
+    entry = Object.assign(base, {hecho: {id: it.ex, n: nombrePlan(it)}, sets: Array.from({length: nSeries(it)}, (_, i) => Object.assign({kg: k, reps, rpe: null}, it.lado ? {lado: i % 2 ? "der" : "izq"} : {})), igual: true});
   } else {
     const sets = leerSets();
     if (!sets.length) { toast("Anota al menos una serie, o usa «Igual al plan» o «No lo hice»."); return; }
@@ -1345,6 +1484,71 @@ function guardarExtraSheet() {
   toast("Extra guardado.");
 }
 
+/* ── historial por ejercicio: todas tus sesiones, también con variantes guardadas con ese nombre ── */
+function sesionesDe(id) {
+  const out = [];
+  for (let w = 1; w <= 52; w++) {
+    const log = LOG[w]; if (!log) continue;
+    W[w - 1].dias.forEach((d, di) => itemsEj(d).forEach(it => {
+      const p = log[claveDe(d.id, it)];
+      if (!registrado(p) || p.omitido || !p.sets.length || hechoDe(p, it).id !== id) return;
+      out.push({w, d: di + 1, sets: p.sets, max: Math.max(...p.sets.map(x => +x.kg || 0)), com: p.com || ""});
+    }));
+  }
+  return out;
+}
+function abrirHistorial(id, nombre) {
+  sheet = {tipo: "hist", id, nombre};
+  ui.dockCtl = false;
+  marcarHoja();
+  cargarHistorial();
+  renderSheet(true);
+}
+function graficoHist(ses, pr) {
+  const pts = ses.slice(-8).map(x => ({l: `S${x.w} D${x.d}`, v: x.max}));
+  const todos = pts.concat(pr && pr.next ? [{l: "próxima", v: pr.next, prox: true}] : []);
+  const vals = todos.map(p => p.v), VW = 360, VH = 170, L = 40, R = 22, T = 12, B = 24;
+  const y0 = Math.floor((Math.min(...vals) - 2) / 5) * 5, y1 = Math.max(y0 + 5, Math.ceil((Math.max(...vals) + 2) / 5) * 5);
+  const X = i => todos.length < 2 ? (L + VW - R) / 2 : L + i * (VW - L - R) / (todos.length - 1), Y = v => T + (y1 - v) / (y1 - y0) * (VH - T - B);
+  const paso = y1 - y0 > 20 ? 10 : 5, grid = [];
+  for (let v = y0; v <= y1; v += paso) grid.push(`<line x1="${L}" x2="${VW - R}" y1="${Y(v)}" y2="${Y(v)}" style="stroke:var(--line)"/><text x="${L - 6}" y="${Y(v) + 3.5}" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" style="fill:var(--mut)">${v}</text>`);
+  const reales = todos.filter(p => !p.prox);
+  const linea = reales.length > 1 ? `<path d="${reales.map((p, i) => (i ? "L" : "M") + X(i).toFixed(1) + " " + Y(p.v).toFixed(1)).join(" ")}" fill="none" style="stroke:var(--acc)" stroke-width="2" stroke-linecap="round"/>` : "";
+  const ip = todos.length - 1, prox = todos[ip] && todos[ip].prox && reales.length ? `<path d="M${X(ip - 1).toFixed(1)} ${Y(reales[reales.length - 1].v).toFixed(1)} L${X(ip).toFixed(1)} ${Y(todos[ip].v).toFixed(1)}" fill="none" style="stroke:var(--faint)" stroke-width="2" stroke-dasharray="4 4"/>` : "";
+  const puntos = todos.map((p, i) => `<circle cx="${X(i)}" cy="${Y(p.v)}" r="4.5" style="${p.prox ? "fill:var(--bg);stroke:var(--faint)" : "fill:var(--acc);stroke:var(--bg)"}" stroke-width="2"/><text x="${X(i)}" y="${VH - 6}" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9" style="fill:var(--mut)">${p.l}</text>`).join("");
+  return `<figure class="chart" style="margin:0"><span class="k">Carga más alta por sesión · kg</span>
+    <svg viewBox="0 0 ${VW} ${VH}" role="img" aria-label="${esc(todos.map(p => `${p.l}: ${f(p.v)} kg`).join("; "))}">${grid.join("")}${linea}${prox}${puntos}</svg></figure>`;
+}
+function histHtml(primera) {
+  const ses = sesionesDe(sheet.id), pr = PROG[sheet.id];
+  return `<div class="sheet${primera ? " entra" : ""}" role="dialog" aria-modal="true" aria-labelledby="sh-h"><div class="sheet-in">
+    <div class="sheet-top"><button class="back" data-sheet-close aria-label="Volver">${ICON.back}</button>
+      <div class="top-txt"><span class="eyebrow">Historial</span><h1 id="sh-h">${esc(sheet.nombre)}</h1></div></div>
+    <div class="sheet-body">
+      ${ses.length ? graficoHist(ses, pr) : `<p class="small mut">Todavía no hay series registradas de este ejercicio${conectado() ? "" : " en este teléfono"}.</p>`}
+      ${pr ? `<div class="prox"><span class="k">PRÓXIMA</span><span><b class="mono">${kg(pr.next)}</b> · ${esc(pr.motivo)}.</span></div>` : ""}
+      ${ses.length ? `<div class="notas-l">${ses.slice().reverse().map(x => `<div class="nota-i"><span class="k">S${x.w} · D${x.d}</span><span class="mono">${esc(resumen(x.sets))}</span>${x.com ? `<p>“${esc(x.com)}”</p>` : ""}</div>`).join("")}</div>` : ""}
+    </div></div></div>`;
+}
+
+/* ── pantalla encendida mientras entrenas (Chrome en Android): con un ejercicio abierto o el registro a mano ── */
+let bloqueo = null, pidiendo = false;
+const pantallaOn = () => { try { return localStorage.getItem("exp-pantalla") !== "0"; } catch (e) { return true; } };
+const quierePantalla = () => pantallaOn() && !!(edit || (sheet && sheet.tipo !== "hist")) && document.visibilityState === "visible";
+async function pantalla() {
+  if (pidiendo || typeof navigator === "undefined" || !navigator.wakeLock) return;  // un pedido a la vez: si no, queda uno suelto encendido
+  const quiere = quierePantalla();
+  try {
+    if (quiere && !bloqueo) {
+      pidiendo = true;
+      const b = await navigator.wakeLock.request("screen");
+      bloqueo = b; b.addEventListener("release", () => { if (bloqueo === b) bloqueo = null; });
+      pidiendo = false;
+      if (!quierePantalla()) pantalla();  // cambió mientras se pedía
+    } else if (!quiere && bloqueo) { const b = bloqueo; bloqueo = null; await b.release(); }
+  } catch (e) { pidiendo = false; }
+}
+
 /* ── borrador: lo que vas anotando sobrevive si el teléfono cierra la app ──
    Las series confirmadas ya se guardan al instante en el registro. Esto cubre lo que todavía no
    confirmas: la serie en curso de Hoy y el registro completo a medio llenar. Dura 12 horas. */
@@ -1352,7 +1556,7 @@ const BKEY = "exp-borrador";
 function guardarBorrador() {
   try {
     const b = {t: Date.now(), w: ui.week, day: ui.day, edit: edit && edit.tocado ? edit : null};
-    if (sheet) b.sheet = sheet.tipo === "reg"
+    if (sheet && sheet.tipo !== "hist") b.sheet = sheet.tipo === "reg"
       ? {tipo: "reg", w: sheet.w, key: sheet.key, rows: sheet.rows, sel: sheet.sel, hid: sheet.hid, otro: sheet.otro, com: sheet.com}
       : {tipo: "extra", w: sheet.w, did: sheet.did, nombre: sheet.nombre, rows: sheet.rows};
     localStorage.setItem(BKEY, JSON.stringify(b));
@@ -1407,6 +1611,7 @@ function render() {
   else renderMas();
   renderDock();
   guardarBorrador();
+  pantalla();
 }
 function irSemana(w) {
   ui.week = Math.max(1, Math.min(52, w));
@@ -1453,6 +1658,32 @@ document.addEventListener("click", async e => {
   if (ds.stp) return pasoNum(ds.stp, Number(ds.d));
   if (ds.rpe) return elegirRpe(Number(ds.rpe));
   if ("guardarset" in ds) return guardarSerie();
+  if (ds.hist) return abrirHistorial(ds.hist, ds.n || "Ejercicio");
+  if (ds.lado && edit) { edit.lado = ds.lado; edit.tocado = true; render(); return; }
+  if (ds.calor) {
+    const k = ds.calor, i = Number(ds.i), a = ui.calor[k] || [];
+    ui.calor[k] = a.includes(i) ? a.filter(x => x !== i) : a.concat(i);
+    render(); return;
+  }
+  if ("pantalla" in ds) { try { localStorage.setItem("exp-pantalla", pantallaOn() ? "0" : "1"); } catch (e) {} render(); return; }
+  if (ds.rtrpe) { ui.rt[ds.rtrpe] = Object.assign({}, ui.rt[ds.rtrpe], {rpe: Number(ds.v)}); renderSemana(); return; }
+  if (ds.rtsave) {
+    const l = ds.rtsave, w = Number(ds.w), b = ui.rt[l] || {}, i = $(`[data-rtkg="${l}"]`), antes = (LOG[w] || {})["rt~" + l] || {};
+    const kgv = num(i ? i.value : b.kg), rpe = b.rpe ?? antes.rpe;
+    if (!(kgv > 0) || !(rpe >= 8)) { toast("Anota los kilos del single y su RPE (8–9)."); return; }
+    LOG[w] = LOG[w] || {};
+    LOG[w]["rt~" + l] = {kg: kgv, reps: 1, rpe, t: Date.now()};
+    ui.rt[l] = {}; dirty.weeks[w] = marca(); pedirGuardado(300); render();
+    toast(`Single guardado: máximo estimado ≈ ${kg(r05(e1rm({kg: kgv, reps: 1, rpe})))}.`); return;
+  }
+  if ("medida" in ds) {
+    const h = new Date(), m = {f: `${h.getFullYear()}-${String(h.getMonth() + 1).padStart(2, "0")}-${String(h.getDate()).padStart(2, "0")}`};
+    let alguna = false;
+    document.querySelectorAll("[data-med]").forEach(x => { const v = num(x.value); if (v != null && v > 0) { m[x.dataset.med] = v; alguna = true; } });
+    if (!alguna) { toast("Anota al menos una medida."); return; }
+    st.medidas = (st.medidas || []).concat([m]);
+    dirty.estado = marca(); pedirGuardado(300); renderAno(); toast("Medición guardada."); return;
+  }
   if ("anillo" in ds) { ui.dockCtl = !ui.dockCtl; if (sheet) renderSheet(); else renderDock(); return; }
   if (ds.selrow !== undefined && sheet) { sheet.sel = Number(ds.selrow); renderSheet(); return; }
   if (ds.open) return abrirRegistro(ui.week, ds.open);
@@ -1486,7 +1717,7 @@ document.addEventListener("click", async e => {
   if ("sheetClose" in ds) return cerrarSheet();
   if ("addSet" in ds) {
     const l = sheet.rows[sheet.rows.length - 1] || {kg: "", reps: "", rpe: ""};
-    sheet.rows.push({kg: l.kg, reps: l.reps, rpe: ""});
+    sheet.rows.push(Object.assign({kg: l.kg, reps: l.reps, rpe: ""}, l.lado ? {lado: l.lado === "izq" ? "der" : "izq"} : {}));
     if (sheet.tipo === "reg") { sheet.sel = sheet.rows.length - 1; renderSheet(); } else refrescarSets();
     return;
   }
@@ -1519,6 +1750,7 @@ document.addEventListener("input", e => {
     if (sheet.tipo === "reg") { const tb = $("#tabla-series"); if (tb) tb.innerHTML = tablaSeries(placeholders()); }
     $("#sh-sum").textContent = sumTxt(); guardarBorrador(); return;
   }
+  if (t.dataset.rtkg) { ui.rt[t.dataset.rtkg] = Object.assign({}, ui.rt[t.dataset.rtkg], {kg: t.value}); return; }
   if (sheet && "otro" in t.dataset) { sheet.otro = t.value; guardarBorrador(); return; }
   if (sheet && "com" in t.dataset) { sheet.com = t.value; guardarBorrador(); return; }
   if (sheet && "xn" in t.dataset) { sheet.nombre = t.value; guardarBorrador(); return; }
@@ -1588,6 +1820,7 @@ function alSalir() {
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return alSalir();
   tickDescanso();
+  pantalla();  // el teléfono suelta el bloqueo al salir; se pide de nuevo al volver
   if (conectado() && !sheet) enCola(pull);
 });
 window.addEventListener("pagehide", alSalir);

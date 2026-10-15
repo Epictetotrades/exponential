@@ -326,12 +326,39 @@ textarea.inp { resize: vertical; }
 .pill { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); font-size: 12.5px; line-height: 1.2; }
 .pill.fal { border: 1px dashed var(--acc); }
 .vol { display: grid; gap: 6px; }
-.vr { display: grid; grid-template-columns: 112px 1fr 32px; gap: 10px; align-items: center; font-size: 12.5px; }
-.track { position: relative; height: 10px; background: var(--sun); }
+.vr { display: grid; grid-template-columns: 112px 1fr 64px; gap: 10px; align-items: center; font-size: 12.5px; }
+.vr.falta > span:first-child { color: var(--acc); font-weight: 600; }
+.track { position: relative; height: 12px; background: var(--sun); }
 .track .band { position: absolute; top: 0; bottom: 0; left: 41.67%; width: 41.67%; background: var(--line); }
-.track .fill { position: absolute; top: 2px; bottom: 2px; left: 0; background: var(--faint); }
+.track .plan { position: absolute; top: 0; bottom: 0; left: 0; border: 1px solid var(--faint); box-sizing: border-box; }
+.track .fill { position: absolute; top: 3px; bottom: 3px; left: 0; background: var(--faint); }
 .track .fill.en { background: var(--acc); }
-.vn { text-align: right; font: 12.5px var(--mono); }
+.vn { text-align: right; font: 12.5px var(--mono); white-space: nowrap; }
+.vn small { font-size: 11px; color: var(--mut); }
+
+/* ── mejoras 2.2: pantalla, calentamiento, discos, por lado, re-test y medidas ── */
+.switch { width: 46px; height: 28px; flex: none; padding: 3px; border: 0; border-radius: 14px; background: var(--line); display: flex; justify-content: flex-start; }
+.switch i { width: 22px; height: 22px; border-radius: 11px; background: var(--bg); }
+.switch[aria-checked="true"] { background: var(--acc); justify-content: flex-end; }
+.switch[aria-checked="true"] i { background: var(--on-acc); }
+.ctx.pantalla span { text-transform: none; letter-spacing: 0; font: 12.5px/1.3 var(--sans); color: var(--tx); }
+.k .pg { text-transform: none; }
+.calor { padding-bottom: 10px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+.discos { padding: 8px 12px; border-radius: 12px; background: var(--sun); font-size: 12.5px; color: var(--mut); }
+.discos b { color: var(--tx); font-size: 15px; font-weight: 500; }
+.seg.lado button { height: 38px; }
+.rt-l { display: flex; flex-direction: column; gap: 10px; }
+.rt { padding: 14px; border: 1px solid var(--line); border-radius: 16px; display: flex; flex-direction: column; gap: 10px; }
+.rt-h { display: flex; align-items: baseline; gap: 8px; }
+.rt-h b { flex: 1; font: 400 20px/1.2 var(--serif); }
+.rt-h span { font-size: 11px; }
+.rt-p { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 8px; align-items: baseline; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.rt-p > span:last-child { display: flex; flex-direction: column; gap: 2px; }
+.rt-s { display: flex; flex-direction: column; gap: 8px; }
+.rt-in { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 8px; align-items: end; }
+.rt-rpe { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.med { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+.kpis .kpi .d { color: var(--mut); }
 
 /* ── Año ── */
 .seg { display: grid; grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 12px; margin-top: 14px; }
