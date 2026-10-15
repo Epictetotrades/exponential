@@ -6,6 +6,7 @@
 
 /* ── versión: súbela en cada publicación (y la etiqueta vX.Y en git) ── */
 const VERSIONES = [
+  {n: "1.11", nombre: "RPE 5 y atrás", fecha: "15 oct 2026", txt: "El RPE va de 5 a 10 (el plan pide 5–7 en intros y descargas), en botones más grandes; el botón «atrás» del teléfono cierra el registro en vez de salir de la app."},
   {n: "1.10", nombre: "Guardado reforzado", fecha: "15 oct 2026", txt: "Lo que vas anotando sin confirmar (la serie en curso y el registro completo) se guarda al instante en el teléfono: si Android cierra la app, al volver sigue ahí. Notas y peso se guardan sin esperar, y al salir de la app se sube lo pendiente."},
   {n: "1.9", nombre: "Revisión", fecha: "15 oct 2026", txt: "Volver a la app desde otra ya no cambia el ejercicio abierto ni borra lo que llevabas escrito; el fin del descanso no cierra el teclado en el registro."},
   {n: "1.8", nombre: "Línea y temas", fecha: "15 oct 2026", txt: "Diseño nuevo: Hoy como línea con la serie en curso y una barra de descanso que guarda la serie; registro completo en foco; Semana como planilla; la cinta del año arriba; 5 temas con modo automático."},
@@ -554,7 +555,7 @@ function header() {
 const nSeries = it => it.k === "single" || it.k === "amrap" ? 1 : +it.sets || 1;
 const esBasico = it => ["main", "single", "amrap"].includes(it.k);
 const incKg = (it, n) => esBasico(it) ? 2.5 : /mancuerna|laterales|posteriores|pájaros/i.test(n || it.n) ? 2 : 2.5;
-const RPES = [6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10];
+const RPES = [5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10];  // el plan va de RPE 5 (intro y descargas) a 10
 const corto = n => /Potencia/.test(n) ? "Potencia" : n.split(" · ")[0];
 function itemsEj(d) { return d.items.filter(it => ["main", "acc", "single", "amrap"].includes(it.k)); }
 function serieTxt(x) {
@@ -1159,13 +1160,23 @@ function abrirRegistro(w, key) {
   sheet = {tipo: "reg", w, key, it, rows, sel: libre >= 0 ? libre : rows.length - 1, hid: esOtro ? "otro" : hecho.id, otro: esOtro ? hecho.n : "", com: (prev && prev.com) || ""};
   ui.dockCtl = false;
   [w - 1, w - 2].filter(x => x >= 1).forEach(x => cargarSemana(x));
+  marcarHoja();
   renderSheet(true);
 }
 function abrirExtra(did) {
   sheet = {tipo: "extra", w: ui.week, did, nombre: "", rows: [1, 2, 3].map(() => ({kg: "", reps: "", rpe: ""}))};
+  marcarHoja();
   renderSheet(true);
 }
-function cerrarSheet() { sheet = null; ui.dockCtl = false; $("#sheet-root").innerHTML = ""; document.body.style.overflow = ""; render(); }
+function cerrarSheet(desdeAtras) {
+  sheet = null; ui.dockCtl = false; $("#sheet-root").innerHTML = ""; document.body.style.overflow = ""; render();
+  // si la hoja dejó una entrada en el historial y no se cerró con «atrás», se quita
+  if (!desdeAtras && typeof history !== "undefined" && history.state && history.state.hoja) { try { history.back(); } catch (e) {} }
+}
+/* La hoja deja una entrada en el historial: el botón «atrás» de Android la cierra en vez de salir de la app. */
+function marcarHoja() {
+  try { if (typeof history !== "undefined" && !(history.state && history.state.hoja)) history.pushState({hoja: 1}, ""); } catch (e) {}
+}
 function placeholders() {
   const s = W[sheet.w - 1], it = sheet.it;
   const hid = sheet.hid === "otro" ? "otro:" + slug(sheet.otro || "") : sheet.hid;
@@ -1580,6 +1591,7 @@ document.addEventListener("visibilitychange", () => {
   if (conectado() && !sheet) enCola(pull);
 });
 window.addEventListener("pagehide", alSalir);
+window.addEventListener("popstate", () => { if (sheet) cerrarSheet(true); });
 
 /* ── inicio ── */
 (async function inicio() {
@@ -1597,7 +1609,7 @@ window.addEventListener("pagehide", alSalir);
   if (ui.week === st.actual) autoDia();
   const conHoja = restaurarBorrador();
   render();
-  if (conHoja) { renderSheet(true); toast("Recuperé lo que estabas anotando."); }
+  if (conHoja) { marcarHoja(); renderSheet(true); toast("Recuperé lo que estabas anotando."); }
   else if (edit && edit.tocado) toast("Recuperé la serie que estabas anotando.");
   if (descansoT) tickDescanso();
   setSync(conectado() ? (navigator.onLine ? "saving" : "offline") : "local", conectado() ? "" : "Guardado solo en este teléfono");

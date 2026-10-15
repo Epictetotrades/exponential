@@ -196,8 +196,8 @@ details.more > div { font-size: 13px; line-height: 1.5; color: var(--mut); margi
 .num:focus { outline: none; background: var(--sun); }
 .num::placeholder { color: var(--faint); font-size: 14px; }
 .rpe { display: flex; flex-direction: column; gap: 4px; }
-.rpe-g { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 3px; }
-.rpe-g button { height: 40px; min-width: 0; padding: 0; border-radius: 10px; border: 1px solid var(--line); background: transparent; font: 12px/1 var(--mono); }
+.rpe-g { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; }
+.rpe-g button { height: 40px; min-width: 0; padding: 0; border-radius: 12px; border: 1px solid var(--line); background: transparent; font: 12px/1 var(--mono); }
 .rpe-g button[aria-pressed="true"] { background: var(--acc); border-color: var(--acc); color: var(--on-acc); font-weight: 500; }
 .link-row { min-height: 44px; border: 0; background: none; padding: 0; display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--mut); text-align: left; }
 .link-row span { flex: 1; }
