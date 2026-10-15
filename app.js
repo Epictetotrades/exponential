@@ -6,6 +6,7 @@
 
 /* ── versión: súbela en cada publicación (y la etiqueta vX.Y en git) ── */
 const VERSIONES = [
+  {n: "1.10", nombre: "Guardado reforzado", fecha: "15 oct 2026", txt: "Lo que vas anotando sin confirmar (la serie en curso y el registro completo) se guarda al instante en el teléfono: si Android cierra la app, al volver sigue ahí. Notas y peso se guardan sin esperar, y al salir de la app se sube lo pendiente."},
   {n: "1.9", nombre: "Revisión", fecha: "15 oct 2026", txt: "Volver a la app desde otra ya no cambia el ejercicio abierto ni borra lo que llevabas escrito; el fin del descanso no cierra el teclado en el registro."},
   {n: "1.8", nombre: "Línea y temas", fecha: "15 oct 2026", txt: "Diseño nuevo: Hoy como línea con la serie en curso y una barra de descanso que guarda la serie; registro completo en foco; Semana como planilla; la cinta del año arriba; 5 temas con modo automático."},
   {n: "1.7", nombre: "Máximo fiable", fecha: "15 oct 2026", txt: "El máximo se estima solo con series de poco margen hasta el fallo: una descarga a RPE 6 ya no propone bajarlo, y un re-test a RPE 8–9 sí cuenta."},
@@ -675,6 +676,7 @@ function pintarEditor() {
   ["kg", "reps"].forEach(fld => { const i = r.querySelector(`[data-ed="${fld}"]`); if (i && document.activeElement !== i) i.value = numTxt(edit[fld]); });
   r.querySelectorAll(".tarjeta [data-rpe]").forEach(b => b.setAttribute("aria-pressed", String(edit.rpe != null && +b.dataset.rpe === +edit.rpe)));
   pintarBarra();
+  guardarBorrador();
 }
 function guardarSerie() {
   if (!edit) return;
@@ -1251,6 +1253,7 @@ function renderSheet(primera) {
   $("#sheet-root").innerHTML = html;
   const nuevo = $(".sheet-body"); if (nuevo && !primera) nuevo.scrollTop = scroll;
   renderDock();
+  guardarBorrador();
 }
 /* Cambios chicos en la hoja (pasos, RPE, escribir) sin redibujarla: no se pierde el foco ni la posición. */
 function refrescarSheet(forzar) {
@@ -1260,6 +1263,7 @@ function refrescarSheet(forzar) {
   document.querySelectorAll(".foco [data-rpe]").forEach(b => b.setAttribute("aria-pressed", String(String(r.rpe) !== "" && +b.dataset.rpe === +r.rpe)));
   const t = $("#tabla-series"); if (t) t.innerHTML = tablaSeries(ph);
   const sm = $("#sh-sum"); if (sm) sm.textContent = sumTxt();
+  guardarBorrador();
 }
 function refrescarSets() { $("#sets").innerHTML = setsHtml({kg: "", reps: "", rpe: ""}); $("#sh-sum").textContent = sumTxt(); }
 function leerSets() {
@@ -1285,12 +1289,13 @@ function pasoNum(fld, d) {
   }
   const it = itemEdit(); if (!it) return;
   edit[fld] = siguienteNum(fld, num(edit[fld]) ?? 0, d, it, hechoDe((LOG[edit.w] || {})[edit.key], it).n);
+  edit.tocado = true;
   const i = $(`#v-hoy [data-ed="${fld}"]`); if (i) i.value = numTxt(edit[fld]);
   pintarEditor();
 }
 function elegirRpe(v) {
   if (sheet && sheet.tipo === "reg") { const row = sheet.rows[sheet.sel]; row.rpe = num(row.rpe) === v ? "" : numTxt(v); refrescarSheet(true); return; }
-  if (edit) { edit.rpe = edit.rpe != null && +edit.rpe === v ? null : v; pintarEditor(); }
+  if (edit) { edit.rpe = edit.rpe != null && +edit.rpe === v ? null : v; edit.tocado = true; pintarEditor(); }
 }
 function guardarSheet(modo) {
   const it = sheet.it, w = sheet.w, key = sheet.key;
@@ -1329,11 +1334,50 @@ function guardarExtraSheet() {
   toast("Extra guardado.");
 }
 
+/* ── borrador: lo que vas anotando sobrevive si el teléfono cierra la app ──
+   Las series confirmadas ya se guardan al instante en el registro. Esto cubre lo que todavía no
+   confirmas: la serie en curso de Hoy y el registro completo a medio llenar. Dura 12 horas. */
+const BKEY = "exp-borrador";
+function guardarBorrador() {
+  try {
+    const b = {t: Date.now(), w: ui.week, day: ui.day, edit: edit && edit.tocado ? edit : null};
+    if (sheet) b.sheet = sheet.tipo === "reg"
+      ? {tipo: "reg", w: sheet.w, key: sheet.key, rows: sheet.rows, sel: sheet.sel, hid: sheet.hid, otro: sheet.otro, com: sheet.com}
+      : {tipo: "extra", w: sheet.w, did: sheet.did, nombre: sheet.nombre, rows: sheet.rows};
+    localStorage.setItem(BKEY, JSON.stringify(b));
+  } catch (e) {}
+}
+function restaurarBorrador() {
+  let b = null;
+  try { b = JSON.parse(localStorage.getItem(BKEY) || "null"); } catch (e) {}
+  if (!b || Date.now() - (b.t || 0) > 12 * 3600 * 1000) return false;
+  const e = b.edit;
+  if (e && e.w === ui.week && itemDeClave(e.w, e.key)) {
+    const prev = (LOG[e.w] || {})[e.key], n = prev && prev.sets && !prev.omitido ? prev.sets.length : 0;
+    edit = Object.assign({}, e, {idx: Math.min(e.idx, n)});
+    const d = W[e.w - 1].dias.findIndex(x => x.id === e.key.split(":")[0]);
+    if (d >= 0) ui.day = d;
+    ui.abierto = e.key;
+  }
+  const h = b.sheet;
+  if (h && h.tipo === "reg" && itemDeClave(h.w, h.key) && Array.isArray(h.rows) && h.rows.length) {
+    sheet = Object.assign({}, h, {it: itemDeClave(h.w, h.key), sel: Math.max(0, Math.min(h.sel || 0, h.rows.length - 1))});
+    return true;
+  }
+  if (h && h.tipo === "extra" && W[h.w - 1] && Array.isArray(h.rows) && h.rows.length) { sheet = Object.assign({}, h); return true; }
+  return false;
+}
+
 /* ── vistas ── */
 function autoDia() {
   const s = W[ui.week - 1], log = LOG[s.w] || {};
   const i = s.dias.findIndex(d => itemsEj(d).some(it => !registrado(log[claveDe(d.id, it)])));
   const dia = i >= 0 ? i : 0;
+  // Si estabas anotando una serie de esta semana, se queda abierta en su día.
+  if (edit && edit.tocado && edit.w === s.w) {
+    const d = s.dias.findIndex(x => x.id === edit.key.split(":")[0]);
+    if (d >= 0) { ui.day = d; ui.abierto = edit.key; return; }
+  }
   // Volver a la app desde otra (música, mensajes) no cambia el ejercicio abierto ni borra lo que llevabas.
   if (dia !== ui.day || !edit || edit.w !== s.w) ui.abierto = undefined;
   ui.day = dia;
@@ -1351,6 +1395,7 @@ function render() {
   else if (ui.tab === "ano") renderAno();
   else renderMas();
   renderDock();
+  guardarBorrador();
 }
 function irSemana(w) {
   ui.week = Math.max(1, Math.min(52, w));
@@ -1393,7 +1438,7 @@ document.addEventListener("click", async e => {
     else { ui.abierto = ds.abrir; edit = nuevoEdit(ui.week, ds.abrir); }
     ui.dockCtl = false; render(); return;
   }
-  if (ds.editset !== undefined && edit) { edit = nuevoEdit(edit.w, edit.key, Number(ds.editset)); render(); return; }
+  if (ds.editset !== undefined && edit) { edit = nuevoEdit(edit.w, edit.key, Number(ds.editset)); edit.tocado = true; render(); return; }
   if (ds.stp) return pasoNum(ds.stp, Number(ds.d));
   if (ds.rpe) return elegirRpe(Number(ds.rpe));
   if ("guardarset" in ds) return guardarSerie();
@@ -1457,25 +1502,26 @@ document.addEventListener("click", async e => {
 const _deb = {};
 document.addEventListener("input", e => {
   const t = e.target;
-  if (!sheet && t.dataset.ed && edit) { edit[t.dataset.ed] = t.value; pintarBarra(); return; }
+  if (!sheet && t.dataset.ed && edit) { edit[t.dataset.ed] = t.value; edit.tocado = true; pintarBarra(); guardarBorrador(); return; }
   if (sheet && t.dataset.f) {
     sheet.rows[Number(t.dataset.i)][t.dataset.f] = t.value;
     if (sheet.tipo === "reg") { const tb = $("#tabla-series"); if (tb) tb.innerHTML = tablaSeries(placeholders()); }
-    $("#sh-sum").textContent = sumTxt(); return;
+    $("#sh-sum").textContent = sumTxt(); guardarBorrador(); return;
   }
-  if (sheet && "otro" in t.dataset) { sheet.otro = t.value; return; }
-  if (sheet && "com" in t.dataset) { sheet.com = t.value; return; }
-  if (sheet && "xn" in t.dataset) { sheet.nombre = t.value; return; }
+  if (sheet && "otro" in t.dataset) { sheet.otro = t.value; guardarBorrador(); return; }
+  if (sheet && "com" in t.dataset) { sheet.com = t.value; guardarBorrador(); return; }
+  if (sheet && "xn" in t.dataset) { sheet.nombre = t.value; guardarBorrador(); return; }
   if (t.dataset.dn) {
     const w = ui.week, did = t.dataset.dn;
     LOG[w] = LOG[w] || {};
     LOG[w]["n~" + did] = {txt: t.value.trim(), t: Date.now()};
     dirty.weeks[w] = marca();
+    saveStore();  // en el teléfono, al instante; la subida espera a que dejes de escribir
     clearTimeout(_deb.dn); _deb.dn = setTimeout(() => pedirGuardado(0), 800);
     return;
   }
   if (t.id === "c-kg" || t.id === "c-reps") actualizarCalc();
-  else if (t.id === "peso") { st.peso = t.value; dirty.estado = marca(); actualizarPeso(); clearTimeout(_deb.p); _deb.p = setTimeout(() => pedirGuardado(0), 900); }
+  else if (t.id === "peso") { st.peso = t.value; dirty.estado = marca(); saveStore(); actualizarPeso(); clearTimeout(_deb.p); _deb.p = setTimeout(() => pedirGuardado(0), 900); }
 });
 /* Puntos del gráfico de avance: tocar o enfocar muestra el detalle debajo. */
 function mostrarPunto(el) {
@@ -1524,11 +1570,16 @@ setInterval(() => {
   if (document.visibilityState !== "visible" || !conectado() || sheet || editando() || !navigator.onLine) return;
   [...new Set([ui.week, st.actual])].forEach(w => cargarSemana(w, true));
 }, 90000);
+function alSalir() {
+  saveStore(); guardarBorrador();
+  if (conectado() && pendientes() && navigator.onLine) enCola(flush);
+}
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState !== "visible") return;
+  if (document.visibilityState !== "visible") return alSalir();
   tickDescanso();
   if (conectado() && !sheet) enCola(pull);
 });
+window.addEventListener("pagehide", alSalir);
 
 /* ── inicio ── */
 (async function inicio() {
@@ -1544,7 +1595,10 @@ document.addEventListener("visibilitychange", () => {
   W = DATA.semanas; G = DATA.grupos; P64 = DATA.p64;
   ui.week = Math.max(1, Math.min(52, ui.week || st.actual));
   if (ui.week === st.actual) autoDia();
+  const conHoja = restaurarBorrador();
   render();
+  if (conHoja) { renderSheet(true); toast("Recuperé lo que estabas anotando."); }
+  else if (edit && edit.tocado) toast("Recuperé la serie que estabas anotando.");
   if (descansoT) tickDescanso();
   setSync(conectado() ? (navigator.onLine ? "saving" : "offline") : "local", conectado() ? "" : "Guardado solo en este teléfono");
   if (conectado()) enCola(pull);
