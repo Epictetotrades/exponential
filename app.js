@@ -6,6 +6,7 @@
 
 /* ── versión: súbela en cada publicación (y la etiqueta vX.Y en git) ── */
 const VERSIONES = [
+  {n: "1.9", nombre: "Revisión", fecha: "15 oct 2026", txt: "Volver a la app desde otra ya no cambia el ejercicio abierto ni borra lo que llevabas escrito; el fin del descanso no cierra el teclado en el registro."},
   {n: "1.8", nombre: "Línea y temas", fecha: "15 oct 2026", txt: "Diseño nuevo: Hoy como línea con la serie en curso y una barra de descanso que guarda la serie; registro completo en foco; Semana como planilla; la cinta del año arriba; 5 temas con modo automático."},
   {n: "1.7", nombre: "Máximo fiable", fecha: "15 oct 2026", txt: "El máximo se estima solo con series de poco margen hasta el fallo: una descarga a RPE 6 ya no propone bajarlo, y un re-test a RPE 8–9 sí cuenta."},
   {n: "1.6", nombre: "Comentarios", fecha: "14 oct 2026", txt: "Comentarios de Claude dentro de la app; variantes del gimnasio completas; vuelve «Añadir serie»."},
@@ -910,6 +911,13 @@ function iniciarDescanso(seg, nombre) {
 function pararDescanso() {
   descansoT = null; guardarDescanso();
   clearInterval(reloj); reloj = null;
+  if (sheet && !ui.dockCtl) {
+    // con la hoja abierta solo se vacía el anillo: redibujarla cerraría el teclado si estás escribiendo
+    const t = $("#dock-t"), p = $("#dock-p");
+    if (t) t.textContent = sheet.it ? descanso(sheet.it).replace(" min", "′").replace(/ en par$/, "") : "";
+    if (p) p.setAttribute("stroke-dasharray", `0 ${ANILLO}`);
+    return;
+  }
   ui.dockCtl = false;
   if (sheet) renderSheet(); else renderDock();
 }
@@ -1325,8 +1333,10 @@ function guardarExtraSheet() {
 function autoDia() {
   const s = W[ui.week - 1], log = LOG[s.w] || {};
   const i = s.dias.findIndex(d => itemsEj(d).some(it => !registrado(log[claveDe(d.id, it)])));
-  ui.day = i >= 0 ? i : 0;
-  ui.abierto = undefined;
+  const dia = i >= 0 ? i : 0;
+  // Volver a la app desde otra (música, mensajes) no cambia el ejercicio abierto ni borra lo que llevabas.
+  if (dia !== ui.day || !edit || edit.w !== s.w) ui.abierto = undefined;
+  ui.day = dia;
 }
 function render() {
   if (!DATA) return;

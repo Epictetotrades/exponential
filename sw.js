@@ -1,7 +1,7 @@
 /* Guarda la app en el teléfono para que abra sin señal.
    Con señal, siempre pide la versión más nueva y la guarda; sin señal, usa la guardada.
    Las llamadas a GitHub (tus registros) nunca pasan por la caché. */
-const CACHE = "exponential-1.8";  // igual a la versión de app.js
+const CACHE = "exponential-1.9";  // igual a la versión de app.js
 const SHELL = ["./", "index.html", "styles.css", "app.js", "data/plan.json", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png"];
 
