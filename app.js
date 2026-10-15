@@ -6,6 +6,7 @@
 
 /* ── versión: súbela en cada publicación (y la etiqueta vX.Y en git) ── */
 const VERSIONES = [
+  {n: "1.5", nombre: "Descanso y avance", fecha: "14 oct 2026", txt: "Temporizador de descanso con vibración y gráfico de tu máximo estimado por semana."},
   {n: "1.4", nombre: "Versiones", fecha: "14 oct 2026", txt: "Nombre de versión visible en Más y este historial."},
   {n: "1.3", nombre: "Compacta", fecha: "14 oct 2026", txt: "Más ejercicios por pantalla; la app se actualiza al abrirla con señal."},
   {n: "1.2", nombre: "Clave fácil", fecha: "14 oct 2026", txt: "Enlace a GitHub con la clave ya rellena; registros sin reps visibles."},
@@ -93,7 +94,7 @@ let seq = Date.now();
 const marca = () => ++seq;
 let cfg = {owner: "Epictetotrades", repo: "exponential-datos", token: ""};
 let lastSync = null;
-const ui = {tab: "hoy", week: 13, day: 0, mas: "bloques", dayTouched: false};
+const ui = {tab: "hoy", week: 13, day: 0, mas: "bloques", dayTouched: false, av: "banca", avPt: null};
 const loaded = {};
 let sheet = null;
 
@@ -670,6 +671,7 @@ function tablaMaximos() {
   <label class="fl" style="margin-top:12px">Jalón (S11–S18) <input class="inp mono" type="text" inputmode="decimal" value="${esc(st.jalon)}" placeholder="${DATA.rm_inicial.jalon}" data-jalon="1" style="max-width:140px"></label>`;
 }
 function renderAno() {
+  cargarHistorial();
   const s = W[st.actual - 1];
   const prox = TESTS.filter(t => t >= st.actual).slice(0, 2);
   const b = rmDe(st.actual, "banca");
@@ -681,7 +683,10 @@ function renderAno() {
   }).join("");
   $("#v-ano").innerHTML = `
     <div class="stats"><div><span class="k">ESTÁS EN</span><span class="n">S${st.actual}</span></div><div><span class="k">PRÓX. TEST</span><span class="n">${prox.length ? "S" + prox[0] : "año 2"}</span></div><div><span class="k">BANCA</span><span class="n">${f(b)}</span></div></div>
-    <p class="small mut" style="margin-top:10px">${esc(etiqueta(s))}. Con 100 kg en banca hoy ≈ ${repsTxt(repsDePct(100 / b * 100))} reps <span class="pg">p.64</span>. El punto blanco marca las semanas de test.</p>
+    <h2>Tu avance</h2>
+    ${avanceHtml()}
+    <h2>El año</h2>
+    <p class="small mut">${esc(etiqueta(s))}. El punto blanco marca las semanas de test.</p>
     ${ciclos}
     <div class="legend">
       <span><i class="sw" style="background:var(--f-intro)"></i>Intro</span><span><i class="sw" style="background:var(--f-acc)"></i>Volumen</span>
@@ -697,6 +702,119 @@ function renderAno() {
     <div class="rule"><p><b>Cuatro veces.</b> Acumulación, intensificación y test dejan entre 8 y 16 semanas de un test al siguiente en el programa avanzado del libro <span class="pg">p.248</span>. Por cómo progresas, el libro te pone en intermedio <span class="pg">p.109, p.114</span>, así que caben cuatro: S1–S18, S19–S31, S32–S44 y S45–S52.</p>
     <p><b>No es repetir lo mismo.</b> Cada vuelta parte con los máximos del test anterior, así que las cargas suben <span class="pg">p.110–111, p.243</span>. El énfasis alterna entre hipertrofia y fuerza <span class="pg">p.256–257</span>, y los compuestos de apoyo pueden cambiar entre mesociclos <span class="pg">p.218</span>.</p>
     <p class="small mut">S1–S10 siguen el ciclo de 8 semanas del libro con una semana intro y el taper aparte <span class="pg">p.104–105, p.132, p.136</span>. S11–S18 es tu fuerza renovada y no se toca, porque vienes progresando <span class="pg">p.122</span>.</p></div>`;
+}
+
+/* ── avance: máximo estimado por semana (tabla de p.64, solo series con RPE) ── */
+const LIFT_N = {banca: "Banca", sentadilla: "Sentadilla", peso_muerto: "Peso muerto"};
+let historialPedido = false;
+function cargarHistorial() {
+  if (historialPedido || !conectado()) return;
+  historialPedido = true;
+  const faltan = [];
+  for (let w = 1; w <= st.actual; w++) if (!loaded[w]) faltan.push(w);
+  Promise.all(faltan.map(w => cargarSemana(w))).then(() => { if (ui.tab === "ano" && !sheet && !editando()) render(); });
+}
+function serieAvance(lift) {
+  const pts = [], sinRpe = [];
+  for (let w = 1; w <= st.actual; w++) {
+    const log = LOG[w]; if (!log) continue;
+    let mejor = null, hubo = false;
+    W[w - 1].dias.forEach(d => d.items.forEach(it => {
+      if (!["main", "single", "amrap"].includes(it.k) || it.ex === "pausa" || (it.lift || it.ex) !== lift) return;
+      const p = log[claveDe(d.id, it)];
+      if (!registrado(p) || p.omitido || hechoDe(p, it).id !== it.ex) return;
+      hubo = true;
+      p.sets.forEach(x => {
+        const rpe = it.k === "amrap" ? 10 : x.rpe;  // un AMRAP es hasta el fallo
+        const v = e1rm({kg: x.kg, reps: x.reps, rpe});
+        if (v && (!mejor || v > mejor.v)) mejor = {w, v, kg: x.kg, reps: x.reps, rpe};
+      });
+    }));
+    if (mejor) pts.push(mejor); else if (hubo) sinRpe.push(w);
+  }
+  return {pts, sinRpe};
+}
+function tipAvance(p) {
+  return `S${p.w}: ≈ ${kg(r05(p.v))} estimado, con tu mejor serie ${f(p.kg)} × ${p.reps} a RPE ${f(p.rpe)} (tabla p.64).`;
+}
+function avanceHtml() {
+  const lift = ui.av, {pts, sinRpe} = serieAvance(lift), ref = rmDe(st.actual, lift);
+  const seg = `<div class="seg" role="group" aria-label="Levantamiento" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:0">${Object.entries(LIFT_N).map(([id, n]) => `<button data-av="${id}" aria-pressed="${id === lift}">${n}</button>`).join("")}</div>`;
+  const ultimo = pts[pts.length - 1];
+  const meta = lift === "banca" ? (() => {
+    const v = ultimo ? ultimo.v : ref;
+    return `<p class="small" style="margin:8px 0 0;color:var(--tx2)">Con 100 kg hoy ≈ <b class="mono">${repsTxt(repsDePct(100 / v * 100))} reps</b> (p.64). Tu meta: <b class="mono">20</b>.</p>`;
+  })() : "";
+  if (!pts.length) return `${seg}<p class="small mut" style="margin-top:12px">Todavía no hay series de ${LIFT_N[lift].toLowerCase()} con RPE. Anota el RPE en tus series y aquí verás tu máximo estimado semana a semana.${sinRpe.length ? ` Semanas registradas sin RPE: ${sinRpe.map(w => "S" + w).join(", ")}.` : ""}</p>${meta}`;
+  // geometría
+  const VW = 360, VH = 190, L = 40, R = 14, T = 16, B = 26;
+  const x0 = Math.max(1, Math.min(pts[0].w, st.actual - 4)), x1 = Math.max(st.actual, x0 + 1);
+  const vals = pts.map(p => p.v).concat(ref);
+  const y0 = Math.floor((Math.min(...vals) - 4) / 5) * 5, y1 = Math.ceil((Math.max(...vals) + 4) / 5) * 5;
+  const X = w => L + (w - x0) / (x1 - x0) * (VW - L - R), Y = v => T + (y1 - v) / (y1 - y0) * (VH - T - B);
+  const paso = (y1 - y0) > 30 ? 10 : 5, grid = [];
+  for (let v = y0; v <= y1; v += paso) grid.push(`<line x1="${L}" x2="${VW - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="#26282c" stroke-width="1"/><text x="${L - 6}" y="${Y(v) + 3.5}" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="#9c9890">${v}</text>`);
+  const cada = (x1 - x0) > 10 ? 2 : 1, xs = [];
+  for (let w = x0; w <= x1; w += cada) xs.push(`<text x="${X(w)}" y="${VH - 8}" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="#9c9890">S${w}</text>`);
+  const linea = pts.length > 1 ? `<path d="${pts.map((p, i) => (i ? "L" : "M") + X(p.w).toFixed(1) + " " + Y(p.v).toFixed(1)).join(" ")}" fill="none" stroke="#b9a27a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` : "";
+  const refY = Y(ref);
+  const puntos = pts.map((p, i) => `<circle class="hit" data-pt="${i}" cx="${X(p.w)}" cy="${Y(p.v)}" r="16" fill="transparent" tabindex="0" role="button" aria-label="${esc(tipAvance(p))}"/><circle class="pt" cx="${X(p.w)}" cy="${Y(p.v)}" r="4.5" fill="#b9a27a" stroke="#111214" stroke-width="2" pointer-events="none"/>`).join("");
+  const sel = pts[ui.avPt != null && pts[ui.avPt] ? ui.avPt : pts.length - 1];
+  return `${seg}
+    <figure class="chart" style="margin:12px 0 0">
+      <svg viewBox="0 0 ${VW} ${VH}" role="img" aria-label="${esc(LIFT_N[lift])}: máximo estimado por semana">
+        ${grid.join("")}${xs.join("")}
+        <line x1="${L}" x2="${VW - R}" y1="${refY}" y2="${refY}" stroke="#6f6c66" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <text x="${VW - R}" y="${refY - 5}" text-anchor="end" font-family="IBM Plex Sans, sans-serif" font-size="10.5" fill="#9c9890">máximo del plan ${f(ref)}</text>
+        ${linea}${puntos}
+      </svg>
+      <figcaption class="small" id="av-tip" style="color:var(--tx2);margin-top:6px">${esc(tipAvance(sel))}</figcaption>
+    </figure>
+    ${meta}
+    <details class="more" style="margin-top:8px"><summary>Ver los datos</summary><div><table><thead><tr><th>Semana</th><th class="n">Máximo estimado</th><th class="n">Mejor serie</th></tr></thead><tbody>
+      ${pts.map(p => `<tr><td class="mono">S${p.w}</td><td class="n">${kg(r05(p.v))}</td><td class="n">${f(p.kg)} × ${p.reps} @ ${f(p.rpe)}</td></tr>`).join("")}
+      ${sinRpe.map(w => `<tr><td class="mono">S${w}</td><td class="n mut">sin RPE</td><td class="n mut">—</td></tr>`).join("")}
+    </tbody></table></div></details>`;
+}
+
+/* ── temporizador de descanso ── */
+const TKEY = "exp-descanso";
+let descansoT = null, reloj = null, audioCtx = null;
+try { descansoT = JSON.parse(localStorage.getItem(TKEY) || "null"); } catch (e) {}
+const segundosDescanso = txt => { const m = String(txt).match(/(\d+)/); return m ? +m[1] * 60 : 120; };  // el mínimo del rango
+function guardarDescanso() { try { descansoT ? localStorage.setItem(TKEY, JSON.stringify(descansoT)) : localStorage.removeItem(TKEY); } catch (e) {} }
+function iniciarDescanso(seg, nombre) {
+  try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+  descansoT = {fin: Date.now() + seg * 1000, nombre};
+  guardarDescanso();
+  tickDescanso();
+}
+function pararDescanso() {
+  descansoT = null; guardarDescanso();
+  clearInterval(reloj); reloj = null;
+  $("#timer-root").innerHTML = "";
+}
+function avisoDescanso() {
+  try { if (navigator.vibrate) navigator.vibrate([400, 200, 400]); } catch (e) {}
+  try {
+    if (!audioCtx) return;
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.frequency.value = 880; g.gain.value = 0.15; o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + 0.35);
+  } catch (e) {}
+}
+function tickDescanso() {
+  if (!descansoT) return;
+  const r = Math.ceil((descansoT.fin - Date.now()) / 1000);
+  if (r <= 0) { const n = descansoT.nombre; pararDescanso(); avisoDescanso(); toast(`Descanso terminado${n ? " · " + n : ""}. A la siguiente serie.`); return; }
+  const root = $("#timer-root");
+  if (!root.firstChild) root.innerHTML = `<div class="timer" role="group" aria-label="Descanso">
+    <span class="timer-t" id="timer-t"></span>
+    <button data-tmas="-30" aria-label="Restar 30 segundos">−30</button>
+    <button data-tmas="30" aria-label="Sumar 30 segundos">+30</button>
+    <button data-tstop aria-label="Parar el descanso">Parar</button></div>`;
+  $("#timer-t").textContent = `Descanso ${Math.floor(r / 60)}:${String(r % 60).padStart(2, "0")}`;
+  if (!reloj) reloj = setInterval(tickDescanso, 250);
 }
 
 /* ── render: Más ── */
@@ -913,7 +1031,9 @@ function renderSheet() {
           <div class="sets-h"><span></span><span>KILOS</span><span>REPS</span><span>RPE</span></div>
           <div id="sets" style="display:flex;flex-direction:column;gap:8px">${setsHtml(ph)}</div>
           <p class="small mut" style="margin:0">Lo gris es lo sugerido: si escribes algo en una serie, lo vacío de esa serie toma lo sugerido. El RPE nunca se inventa.</p>
-          <div class="btn-row"><button class="btn ghost" data-add-set>Añadir serie</button><button class="btn quiet" data-del-set>Quitar la última</button></div>
+          <div class="btn-row"><button class="btn ghost" data-add-set>Repetir la última serie</button><button class="btn quiet" data-del-set>Quitar la última</button></div>
+          <button class="btn" data-descanso>Iniciar descanso · ${esc(descanso(it))}</button>
+          <p class="small mut" style="margin:0">El descanso también empieza solo cuando anotas las reps de una serie esta semana.</p>
         </div>
         <div class="btn-row"><button class="btn" data-igual>Igual al plan</button><button class="btn quiet" data-omit>No lo hice</button></div>
         <label class="fl">Comentario<textarea class="inp" rows="2" data-com placeholder="Cómo te sentiste, técnica, dolor… (opcional)">${esc(sheet.com)}</textarea></label>
@@ -1041,6 +1161,10 @@ document.addEventListener("click", async e => {
   if (ds.open) return abrirRegistro(ui.week, ds.open);
   if (ds.extraOpen) return abrirExtra(ds.extraOpen);
   if (ds.mas) { ui.mas = ds.mas; saveStore(); render(); return; }
+  if (ds.av) { ui.av = ds.av; ui.avPt = null; renderAno(); return; }
+  if (ds.tmas) { if (descansoT) { descansoT.fin = Math.max(Date.now() + 5000, descansoT.fin + Number(ds.tmas) * 1000); guardarDescanso(); tickDescanso(); } return; }
+  if ("tstop" in ds) return pararDescanso();
+  if ("descanso" in ds && sheet && sheet.it) return iniciarDescanso(segundosDescanso(descanso(sheet.it)), nombrePlan(sheet.it));
   if (ds.delx) {
     const w = ui.week, k = "x~" + ds.delx, i = Number(ds.i);
     if (!LOG[w] || !LOG[w][k]) return;
@@ -1096,8 +1220,20 @@ document.addEventListener("input", e => {
   if (t.id === "c-kg" || t.id === "c-reps") actualizarCalc();
   else if (t.id === "peso") { st.peso = t.value; dirty.estado = marca(); actualizarPeso(); clearTimeout(_deb.p); _deb.p = setTimeout(() => pedirGuardado(0), 900); }
 });
+/* Puntos del gráfico de avance: tocar o enfocar muestra el detalle debajo. */
+function mostrarPunto(el) {
+  ui.avPt = Number(el.dataset.pt);
+  const p = serieAvance(ui.av).pts[ui.avPt], tip = $("#av-tip");
+  if (p && tip) tip.textContent = tipAvance(p);
+}
+document.addEventListener("click", e => { const h = e.target.closest && e.target.closest(".hit"); if (h) mostrarPunto(h); });
+document.addEventListener("focusin", e => { if (e.target.classList && e.target.classList.contains("hit")) mostrarPunto(e.target); });
 document.addEventListener("change", e => {
   const t = e.target;
+  // anotaste las reps de una serie de esta semana: empieza el descanso de ese ejercicio
+  if (sheet && sheet.tipo === "reg" && t.dataset.f === "reps" && t.value.trim() && sheet.w === st.actual) {
+    iniciarDescanso(segundosDescanso(descanso(sheet.it)), nombrePlan(sheet.it));
+  }
   if (sheet && "hecho" in t.dataset) {
     sheet.hid = t.value;
     $("#otro-wrap").hidden = t.value !== "otro";
@@ -1115,7 +1251,11 @@ document.addEventListener("change", e => {
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && sheet) cerrarSheet(); });
 window.addEventListener("online", () => enCola(flush));
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && conectado() && !sheet) enCola(pull); });
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  tickDescanso();
+  if (conectado() && !sheet) enCola(pull);
+});
 
 /* ── inicio ── */
 (async function inicio() {
@@ -1132,6 +1272,7 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
   ui.week = Math.max(1, Math.min(52, ui.week || st.actual));
   if (ui.week === st.actual) autoDia();
   render();
+  if (descansoT) tickDescanso();
   setSync(conectado() ? (navigator.onLine ? "saving" : "offline") : "local", conectado() ? "" : "Guardado solo en este teléfono");
   if (conectado()) enCola(pull);
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});

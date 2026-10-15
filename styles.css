@@ -260,6 +260,24 @@ td.n, th.n { text-align: right; font-family: var(--mono); }
   font-size: 14px; font-weight: 500; box-shadow: 0 6px 24px rgba(0,0,0,.4); max-width: calc(100% - 40px);
 }
 
+/* temporizador de descanso */
+.timer {
+  position: fixed; left: 50%; transform: translateX(-50%); z-index: 70;
+  bottom: calc(var(--nav-h) + var(--safe-b) + 28px);
+  display: flex; align-items: center; gap: 2px; padding: 4px 4px 4px 16px;
+  background: var(--s2); border: 1px solid var(--line2); border-radius: 26px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .45);
+}
+.timer-t { font: 500 15px/1 var(--mono); margin-right: 8px; white-space: nowrap; }
+.timer button { min-width: 44px; height: 40px; border: 0; border-radius: 20px; background: transparent; color: var(--tx2); font: 500 13px/1 var(--mono); }
+.timer button[data-tstop] { color: var(--fal); }
+
+/* gráfico de avance */
+.chart svg { display: block; width: 100%; height: auto; }
+.chart .hit { cursor: pointer; }
+.chart .hit:focus-visible { outline: none; }
+.chart .hit:focus-visible + .pt { stroke: var(--tx); }
+
 @media (min-width: 600px) {
   main { padding-left: 24px; padding-right: 24px; }
 }
