@@ -6,6 +6,7 @@
 
 /* ── versión: súbela en cada publicación (y la etiqueta vX.Y en git) ── */
 const VERSIONES = [
+  {n: "1.6", nombre: "Comentarios", fecha: "14 oct 2026", txt: "Comentarios de Claude dentro de la app; variantes del gimnasio completas; vuelve «Añadir serie»."},
   {n: "1.5", nombre: "Descanso y avance", fecha: "14 oct 2026", txt: "Temporizador de descanso con vibración y gráfico de tu máximo estimado por semana."},
   {n: "1.4", nombre: "Versiones", fecha: "14 oct 2026", txt: "Nombre de versión visible en Más y este historial."},
   {n: "1.3", nombre: "Compacta", fecha: "14 oct 2026", txt: "Más ejercicios por pantalla; la app se actualiza al abrirla con señal."},
@@ -59,10 +60,10 @@ const ALT = {
   rumano: {c: "isquios y glúteo con menos carga en la espalda baja", op: [["hiper45", "Hiperextensión a 45°"], ["ghd_cadera", "Extensión de cadera en GHD"]]},
   inclinado: {c: "si los hombros están inestables", op: [["inclinado_smith", "Press inclinado en Smith"]]},
   militar: {c: "si el tronco o la estabilidad fallan", op: [["militar_smith", "Press de hombro sentado en Smith"]]},
-  cerrado: {c: "si la muñeca o el hombro molestan", op: [["cerrado_smith", "Press cerrado en Smith"]]},
+  cerrado: {c: "si la muñeca o el hombro molestan", op: [["cerrado_smith", "Press cerrado en Smith"], ["otro:tricep_v_bar", "Tríceps en polea con barra V"]]},
   laterales: {c: "la máquina es tu preferida", op: [["lateral_maq", "Elevación lateral en máquina"], ["lateral_polea", "Elevación lateral en polea baja"]]},
   polea: {c: "", op: [["triceps_sobre_cabeza", "Extensión de tríceps sobre la cabeza en polea"]]},
-  frances: {c: "si el codo molesta", op: [["triceps_sobre_cabeza", "Extensión de tríceps sobre la cabeza en polea"]]},
+  frances: {c: "si el codo molesta", op: [["triceps_sobre_cabeza", "Extensión de tríceps sobre la cabeza en polea"], ["frances_mancuernas", "Press francés con mancuernas"]]},
   prensa: {c: "", op: [["hack", "Hack squat"]]},
   femoral: {c: "si la máquina está ocupada; es más exigente, baja las series", op: [["nordico_ghd", "Curl nórdico asistido en GHD"]]},
   extension: {c: "si la máquina está ocupada", op: [["extension_polea", "Extensión de cuádriceps en polea"]]},
@@ -71,7 +72,8 @@ const ALT = {
   remo: {c: "cuando la espalda baja o los isquios estén cargados", op: [["remo_pecho", "Remo con apoyo en el pecho"], ["remo_polea", "Remo en polea sentado"]]},
   jalon: {c: "", op: [["jalon_v", "Jalón agarre en V"], ["jalon_ancho", "Jalón agarre ancho"], ["dominada_banda", "Dominadas con banda"]]},
   curl_z: {c: "", op: [["curl_maq", "Curl de bíceps en máquina"]]},
-  martillo: {c: "", op: [["martillo_polea", "Curl martillo en polea con cuerda"]]},
+  martillo: {c: "", op: [["martillo_polea", "Curl martillo en polea con cuerda"], ["curl_maq", "Curl de bíceps en máquina"]]},
+  abduccion: {c: "", op: [["abductor_maq", "Abducción en máquina"], ["abduccion_banda", "Abducción con banda"]]},
   predicador: {c: "", op: [["curl_maq", "Curl de bíceps en máquina"], ["scott_mancuerna", "Curl Scott con mancuerna a un brazo"]]},
   facepull: {c: "", op: [["pajaros_inclinado", "Pájaros en banco inclinado"], ["pecdeck_inv", "Pec deck invertido"]]},
   posteriores: {c: "", op: [["facepull", "Face pull en polea"], ["pecdeck_inv", "Pec deck invertido"]]},
@@ -86,6 +88,7 @@ const ALT = {
 const STORE = "exp-app-v1", CFG = "exp-cfg-v1";
 let st = {actual: 13, rm: [{}, {}, {}, {}, {}], jalon: "", peso: ""};
 let LOG = {}, PROG = {};
+let CLAUDE = {};  // comentarios de Claude por semana: claude/wNN.json → {"d2:femoral": {txt}, "dia~d6": {txt}, "semana": {txt}}
 /* Cada cambio pendiente guarda una marca única: si llega otro cambio mientras se sube el anterior,
    la marca cambia y el pendiente no se borra al terminar la subida. */
 let dirty = {estado: false, prog: false, weeks: {}};
@@ -102,7 +105,7 @@ function readStore() {
   try {
     const s = JSON.parse(localStorage.getItem(STORE) || "null");
     if (s) {
-      st = Object.assign(st, s.st || {}); LOG = s.LOG || {}; PROG = s.PROG || {};
+      st = Object.assign(st, s.st || {}); LOG = s.LOG || {}; PROG = s.PROG || {}; CLAUDE = s.CLAUDE || {};
       dirty = Object.assign({estado: false, prog: false, weeks: {}}, s.dirty || {});
       progBorrados = s.progBorrados || [];
       lastSync = s.lastSync || null;
@@ -115,7 +118,7 @@ function readStore() {
 }
 function saveStore() {
   try {
-    localStorage.setItem(STORE, JSON.stringify({st, LOG, PROG, dirty, progBorrados, lastSync, ui: {week: ui.week, mas: ui.mas}}));
+    localStorage.setItem(STORE, JSON.stringify({st, LOG, PROG, CLAUDE, dirty, progBorrados, lastSync, ui: {week: ui.week, mas: ui.mas}}));
     return true;
   } catch (e) { return false; }
 }
@@ -239,9 +242,12 @@ async function cargarSemana(w, forzar) {
   if (!conectado() || (!forzar && loaded[w])) return;
   loaded[w] = true;
   try {
-    const r = await getFile(weekPath(w));
-    if (r.data) {
-      LOG[w] = mezclar(LOG[w], migrar(w, r.data.e || {}));
+    const [r, c] = await Promise.all([getFile(weekPath(w)), getFile(`claude/w${w}.json`)]);
+    const antesC = JSON.stringify(CLAUDE[w] || {});
+    CLAUDE[w] = (c.data && c.data.e) || {};
+    const cambioC = antesC !== JSON.stringify(CLAUDE[w]);
+    if (r.data) LOG[w] = mezclar(LOG[w], migrar(w, r.data.e || {}));
+    if (r.data || cambioC) {
       saveStore();
       if (!sheet && !editando() && ui.week === w && (ui.tab === "hoy" || ui.tab === "semana")) render();
     }
@@ -574,6 +580,8 @@ function itemRow(s, d, it) {
     if (it.k === "acc" && PROG[h.id] && PROG[h.id].w === s.w) fb = `<div class="feedback">Próxima vez en ${esc(h.n)}: <b class="mono">${kg(PROG[h.id].next)}</b> · ${esc(PROG[h.id].motivo)}.</div>`;
   }
   const det = detalleTxt(s, it);
+  const nc = (CLAUDE[s.w] || {})[key];
+  if (nc && nc.txt) fb += `<div class="claude"><span class="k">CLAUDE</span><span>${esc(nc.txt)}</span></div>`;
   return `<div class="row">
     <button class="ex" data-open="${esc(key)}">
       <div class="ex-head"><div class="ex-name"><span class="tags">${tags.join("")}</span><b>${esc(it.n)}</b></div><span class="chip ${cls}">${txt}</span></div>
@@ -588,7 +596,9 @@ function renderHoy() {
   const s = W[ui.week - 1], d = s.dias[ui.day], log = LOG[s.w] || {};
   const extras = log["x~" + d.id] || [];
   const nd = log["n~" + d.id];
+  const ncDia = (CLAUDE[s.w] || {})["dia~" + d.id];
   $("#v-hoy").innerHTML = `
+    ${ncDia && ncDia.txt ? `<div class="claude" style="margin:12px 0 4px"><span class="k">CLAUDE · ESTE DÍA</span><span>${esc(ncDia.txt)}</span></div>` : ""}
     <div class="list">${d.items.map(it => itemRow(s, d, it)).join("") || '<p class="mut">Día libre o de movilidad.</p>'}</div>
     ${extras.length ? `<h2>Extras</h2><div class="list">${extras.map((x, i) => `<div class="row"><div class="ex-head"><div class="ex-name"><span class="tags"><span class="tag m">Extra</span></span><b>${esc(x.n)}</b></div>
       <button class="btn quiet" style="min-height:36px;padding:0 12px" data-delx="${d.id}" data-i="${i}">Borrar</button></div>
@@ -628,6 +638,7 @@ function renderSemana() {
   $("#v-semana").innerHTML = `
     <div class="chips"><span class="pill">${esc(c.n)}</span><span class="pill" style="border-color:transparent;background:${colorSemana(s)};color:#f2f0eb">${esc(etiqueta(s))}</span><span class="pill">${estado}</span></div>
     <p style="margin-top:14px">${esc(s.nota)}</p>${s.nota_libro ? `<p class="small mut">${esc(s.nota_libro)}</p>` : ""}
+    ${(CLAUDE[s.w] || {}).semana && CLAUDE[s.w].semana.txt ? `<div class="claude" style="margin-top:10px"><span class="k">CLAUDE · ESTA SEMANA</span><span>${esc(CLAUDE[s.w].semana.txt)}</span></div>` : ""}
     ${plantilla ? `<p class="small mut">Esta semana se rediseñó con la Pirámide cuando ya había pasado, así que queda como plantilla: sirve de modelo para repetir el bloque, no tiene registros pendientes.</p>` : ""}
     ${s.w <= st.actual && !plantilla ? `<h2>Registro</h2><div class="stats"><div><span class="k">EJERCICIOS</span><span class="n">${hechos} / ${tot}</span></div><div><span class="k">SERIES</span><span class="n">${series}</span></div><div><span class="k">DÍAS</span><span class="n">${diasCon} / ${s.dias.length}</span></div></div>` : ""}
     ${lifts.length ? `<h2>Básicos</h2><div class="lifts">${lifts.join("")}</div>` : ""}
@@ -1031,7 +1042,7 @@ function renderSheet() {
           <div class="sets-h"><span></span><span>KILOS</span><span>REPS</span><span>RPE</span></div>
           <div id="sets" style="display:flex;flex-direction:column;gap:8px">${setsHtml(ph)}</div>
           <p class="small mut" style="margin:0">Lo gris es lo sugerido: si escribes algo en una serie, lo vacío de esa serie toma lo sugerido. El RPE nunca se inventa.</p>
-          <div class="btn-row"><button class="btn ghost" data-add-set>Repetir la última serie</button><button class="btn quiet" data-del-set>Quitar la última</button></div>
+          <div class="btn-row"><button class="btn ghost" data-add-set>Añadir serie</button><button class="btn quiet" data-del-set>Quitar la última</button></div>
           <button class="btn" data-descanso>Iniciar descanso · ${esc(descanso(it))}</button>
           <p class="small mut" style="margin:0">El descanso también empieza solo cuando anotas las reps de una serie esta semana.</p>
         </div>
@@ -1251,6 +1262,11 @@ document.addEventListener("change", e => {
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && sheet) cerrarSheet(); });
 window.addEventListener("online", () => enCola(flush));
+// Con la app abierta, cada 90 s revisa si hay registros nuevos o comentarios de Claude.
+setInterval(() => {
+  if (document.visibilityState !== "visible" || !conectado() || sheet || editando() || !navigator.onLine) return;
+  [...new Set([ui.week, st.actual])].forEach(w => cargarSemana(w, true));
+}, 90000);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return;
   tickDescanso();
