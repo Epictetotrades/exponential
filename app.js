@@ -6,6 +6,7 @@
 
 /* ── versión: súbela en cada publicación (y la etiqueta vX.Y en git) ── */
 const VERSIONES = [
+  {n: "1.7", nombre: "Máximo fiable", fecha: "15 oct 2026", txt: "El máximo se estima solo con series de poco margen hasta el fallo: una descarga a RPE 6 ya no propone bajarlo, y un re-test a RPE 8–9 sí cuenta."},
   {n: "1.6", nombre: "Comentarios", fecha: "14 oct 2026", txt: "Comentarios de Claude dentro de la app; variantes del gimnasio completas; vuelve «Añadir serie»."},
   {n: "1.5", nombre: "Descanso y avance", fecha: "14 oct 2026", txt: "Temporizador de descanso con vibración y gráfico de tu máximo estimado por semana."},
   {n: "1.4", nombre: "Versiones", fecha: "14 oct 2026", txt: "Nombre de versión visible en Más y este historial."},
@@ -319,6 +320,14 @@ function repsDePct(p) {
 function repsTxt(x) { const a = Math.floor(x + 0.25), b = Math.ceil(x - 0.25); return a === b ? String(a) : a + "–" + b; }
 function rango(r) { const m = String(r).split(/[–-]/).map(Number).filter(x => !isNaN(x)); return [m[0], m[m.length - 1]]; }
 function e1rm(x) { const k = +x.kg, r = +x.reps, rp = +x.rpe; if (!k || !r || !rp) return 0; return k * 100 / pctDeReps(r + (10 - rp)); }
+/* Una serie sirve para estimar el máximo si quedan ~6 reps o menos hasta el fallo: sobre ~5 reps la
+   estimación pierde precisión (p.115, p.120). Así una descarga a RPE 6 no baja tu máximo, y un single
+   de re-test a RPE 8–9 (p.118) sí cuenta. Un AMRAP llega al fallo. */
+const MAX_FIABLE = 6;
+function estimables(it, sets) {
+  if (it.k === "amrap") return sets.map(x => Object.assign({}, x, {rpe: 10}));
+  return sets.filter(x => x.rpe != null && +x.reps + (10 - x.rpe) <= MAX_FIABLE);
+}
 function tramo(w) { return TRAMOS.findIndex(t => w >= t.desde && w <= t.hasta); }
 function rmDe(w, lift) {
   if (lift === "jalon") return Number(st.jalon) || DATA.rm_inicial.jalon;
@@ -571,11 +580,12 @@ function itemRow(s, d, it) {
   if (registrado(prev) && !prev.omitido) {
     const h = hechoDe(prev, it);
     if (h.id === it.ex && ["main", "single", "amrap"].includes(it.k) && it.ex !== "pausa") {
-      const lift = it.lift || "banca", est = Math.max(0, ...prev.sets.map(e1rm));
+      const lift = it.lift || "banca", est = Math.max(0, ...estimables(it, prev.sets).map(e1rm));
       if (est) {
         const actual = rmDe(s.w, lift), v = r05(est);
         fb = `<div class="feedback">Tu registro estima un máximo de ≈ ${kg(v)} (usas ${kg(actual)}).${Math.abs(v - actual) / actual >= 0.02 ? ` <button class="link-btn" data-setrm="${lift}" data-v="${v}" data-w="${s.w}">Usar ${kg(v)} como máximo</button>` : ""}</div>`;
-      } else fb = `<div class="hint">Anota el RPE de alguna serie para estimar tu máximo.</div>`;
+      } else if (prev.sets.some(x => x.rpe != null)) fb = `<div class="hint">Con tanto margen hasta el fallo, el máximo no se puede estimar bien (p.115, p.120). Para estimarlo sirve una serie de 1–3 reps a RPE 8–9 (p.118).</div>`;
+      else fb = `<div class="hint">Anota el RPE de alguna serie para estimar tu máximo.</div>`;
     }
     if (it.k === "acc" && PROG[h.id] && PROG[h.id].w === s.w) fb = `<div class="feedback">Próxima vez en ${esc(h.n)}: <b class="mono">${kg(PROG[h.id].next)}</b> · ${esc(PROG[h.id].motivo)}.</div>`;
   }
@@ -726,37 +736,38 @@ function cargarHistorial() {
   Promise.all(faltan.map(w => cargarSemana(w))).then(() => { if (ui.tab === "ano" && !sheet && !editando()) render(); });
 }
 function serieAvance(lift) {
-  const pts = [], sinRpe = [];
+  const pts = [], sinRpe = [], margen = [];
   for (let w = 1; w <= st.actual; w++) {
     const log = LOG[w]; if (!log) continue;
-    let mejor = null, hubo = false;
+    let mejor = null, hubo = false, conRpe = false;
     W[w - 1].dias.forEach(d => d.items.forEach(it => {
       if (!["main", "single", "amrap"].includes(it.k) || it.ex === "pausa" || (it.lift || it.ex) !== lift) return;
       const p = log[claveDe(d.id, it)];
       if (!registrado(p) || p.omitido || hechoDe(p, it).id !== it.ex) return;
       hubo = true;
-      p.sets.forEach(x => {
-        const rpe = it.k === "amrap" ? 10 : x.rpe;  // un AMRAP es hasta el fallo
-        const v = e1rm({kg: x.kg, reps: x.reps, rpe});
-        if (v && (!mejor || v > mejor.v)) mejor = {w, v, kg: x.kg, reps: x.reps, rpe};
+      if (p.sets.some(x => x.rpe != null)) conRpe = true;
+      estimables(it, p.sets).forEach(x => {
+        const v = e1rm(x);
+        if (v && (!mejor || v > mejor.v)) mejor = {w, v, kg: x.kg, reps: x.reps, rpe: x.rpe};
       });
     }));
-    if (mejor) pts.push(mejor); else if (hubo) sinRpe.push(w);
+    if (mejor) pts.push(mejor); else if (conRpe) margen.push(w); else if (hubo) sinRpe.push(w);
   }
-  return {pts, sinRpe};
+  return {pts, sinRpe, margen};
 }
 function tipAvance(p) {
   return `S${p.w}: ≈ ${kg(r05(p.v))} estimado, con tu mejor serie ${f(p.kg)} × ${p.reps} a RPE ${f(p.rpe)} (tabla p.64).`;
 }
 function avanceHtml() {
-  const lift = ui.av, {pts, sinRpe} = serieAvance(lift), ref = rmDe(st.actual, lift);
+  const lift = ui.av, {pts, sinRpe, margen} = serieAvance(lift), ref = rmDe(st.actual, lift);
+  const faltan = (sinRpe.length ? ` Sin RPE: ${sinRpe.map(w => "S" + w).join(", ")}.` : "") + (margen.length ? ` Con demasiado margen para estimar: ${margen.map(w => "S" + w).join(", ")}.` : "");
   const seg = `<div class="seg" role="group" aria-label="Levantamiento" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:0">${Object.entries(LIFT_N).map(([id, n]) => `<button data-av="${id}" aria-pressed="${id === lift}">${n}</button>`).join("")}</div>`;
   const ultimo = pts[pts.length - 1];
   const meta = lift === "banca" ? (() => {
     const v = ultimo ? ultimo.v : ref;
     return `<p class="small" style="margin:8px 0 0;color:var(--tx2)">Con 100 kg hoy ≈ <b class="mono">${repsTxt(repsDePct(100 / v * 100))} reps</b> (p.64). Tu meta: <b class="mono">20</b>.</p>`;
   })() : "";
-  if (!pts.length) return `${seg}<p class="small mut" style="margin-top:12px">Todavía no hay series de ${LIFT_N[lift].toLowerCase()} con RPE. Anota el RPE en tus series y aquí verás tu máximo estimado semana a semana.${sinRpe.length ? ` Semanas registradas sin RPE: ${sinRpe.map(w => "S" + w).join(", ")}.` : ""}</p>${meta}`;
+  if (!pts.length) return `${seg}<p class="small mut" style="margin-top:12px">Todavía no hay series de ${LIFT_N[lift].toLowerCase()} que permitan estimar tu máximo: hace falta el RPE y no más de ~5 reps de margen hasta el fallo (p.115, p.120).${faltan}</p>${meta}`;
   // geometría
   const VW = 360, VH = 190, L = 40, R = 14, T = 16, B = 26;
   const x0 = Math.max(1, Math.min(pts[0].w, st.actual - 4)), x1 = Math.max(st.actual, x0 + 1);
@@ -785,6 +796,7 @@ function avanceHtml() {
     <details class="more" style="margin-top:8px"><summary>Ver los datos</summary><div><table><thead><tr><th>Semana</th><th class="n">Máximo estimado</th><th class="n">Mejor serie</th></tr></thead><tbody>
       ${pts.map(p => `<tr><td class="mono">S${p.w}</td><td class="n">${kg(r05(p.v))}</td><td class="n">${f(p.kg)} × ${p.reps} @ ${f(p.rpe)}</td></tr>`).join("")}
       ${sinRpe.map(w => `<tr><td class="mono">S${w}</td><td class="n mut">sin RPE</td><td class="n mut">—</td></tr>`).join("")}
+      ${margen.map(w => `<tr><td class="mono">S${w}</td><td class="n mut">mucho margen</td><td class="n mut">—</td></tr>`).join("")}
     </tbody></table></div></details>`;
 }
 
