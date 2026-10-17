@@ -7,6 +7,7 @@
 /* ── versión: súbela en cada publicación (y la etiqueta vX.Y en git). Después de x.9 sigue (x+1).0:
    «1.10» se lee 1,1 y parece anterior a la 1.9. ── */
 const VERSIONES = [
+  {n: "2.5", nombre: "Catálogo por archivo", fecha: "17 oct 2026", txt: "El catálogo se abre solo desde su archivo, por ejemplo el que te mandan por WhatsApp; la app ya no lo busca en el repositorio."},
   {n: "2.4", nombre: "Catálogo desde el repositorio", fecha: "17 oct 2026", txt: "Si el catálogo está en tu repositorio privado, Más › Programas lo trae solo la primera vez y lo deja en el teléfono; si no, se abre desde su archivo."},
   {n: "2.3", nombre: "Varias personas", fecha: "16 oct 2026", txt: "Otra persona puede entrar con su propio repositorio y una clave: pone su punto de partida (una serie de cada básico) y tiene su plan de 52 semanas, su registro y su configuración. Para invitar a alguien: Más › Datos. Nuevo en Más › Programas: el catálogo de programas (Pirámide, Jeff Nippard, The Muscle Ladder y otros), que se abre una vez desde su archivo y queda en el teléfono."},
   {n: "2.2", nombre: "Ocho mejoras", fecha: "15 oct 2026", txt: "Pantalla encendida al entrenar, calentamiento de p.224, discos por lado, re-test de la S14 en Semana, registro por lado (búlgara y copenhagen), medidas en Año, historial por ejercicio y volumen hecho contra el plan con la tabla de p.214. Las RPE de varias series se separan con «/» (8 / 8,5), para no confundirlas con decimales."},
@@ -1333,23 +1334,10 @@ async function leerCat(p) {
   const r = await (await caches.open(CAT_CACHE)).match(catUrl(p));
   return r ? r.json() : null;
 }
-/* Si el catálogo está en el repositorio de la persona (catalogo.json), se carga solo la primera vez, sin buscar el archivo.
-   Se pide en crudo: la API en base64 solo entrega archivos de hasta 1 MB. */
-async function catalogoDelRepo() {
-  const r = await fetch(contentsUrl("catalogo.json"), {cache: "no-store", headers: {
-    Accept: "application/vnd.github.raw+json", Authorization: "Bearer " + cfg.token, "X-GitHub-Api-Version": "2022-11-28"}});
-  if (r.status === 404) return null;
-  if (!r.ok) throw await httpErr(r);
-  return r.json();
-}
 async function cargarCatalogo() {
   if (CATALOGO || catEstado) return;
   catEstado = "cargando";
-  try { CATALOGO = await leerCat("indice.json"); } catch (e) { catEstado = "sin-cache"; }
-  if (!CATALOGO && catEstado === "cargando" && conectado() && navigator.onLine) {
-    try { const C = await catalogoDelRepo(); if (C && await guardarCatalogo(C) === true) toast(`Catálogo traído de tu repositorio: ${C.programas.length} programas.`); } catch (e) {}
-  }
-  if (catEstado === "cargando") catEstado = CATALOGO ? "" : "falta";
+  try { CATALOGO = await leerCat("indice.json"); catEstado = CATALOGO ? "" : "falta"; } catch (e) { catEstado = "sin-cache"; }
   if (ui.tab === "mas" && ui.mas === "programas") renderMas();
 }
 async function cargarFicha(id) {
@@ -1396,8 +1384,8 @@ function archivoHtml() {
       <p style="margin:0"><b>El catálogo no viene dentro de la app.</b> Se abre una vez desde el archivo <span class="mono">exponential-catalogo.json</span> y queda guardado en este teléfono.</p>
       ${botonArchivo("Abrir el archivo del catálogo", "btn pri btn-archivo")}
       <ol class="small" style="padding-left:18px;color:var(--tx2);line-height:1.6;margin:12px 0 0">
-        <li>Guarda el archivo en el teléfono (desde el correo queda en Descargas) o déjalo en tu Drive.</li>
-        <li>Toca el botón: se abre el explorador de archivos. Busca el archivo y tócalo.</li>
+        <li>En WhatsApp, toca el archivo para descargarlo.</li>
+        <li>Vuelve aquí y toca el botón: se abre el explorador de archivos. Búscalo en Recientes o en Documentos y tócalo.</li>
       </ol>
     </div>`;
 }
