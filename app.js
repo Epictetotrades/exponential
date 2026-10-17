@@ -7,6 +7,7 @@
 /* ── versión: súbela en cada publicación (y la etiqueta vX.Y en git). Después de x.9 sigue (x+1).0:
    «1.10» se lee 1,1 y parece anterior a la 1.9. ── */
 const VERSIONES = [
+  {n: "2.3", nombre: "Varias personas", fecha: "16 oct 2026", txt: "Otra persona puede entrar con su propio repositorio y una clave: pone su punto de partida (una serie de cada básico) y tiene su plan de 52 semanas, su registro y su configuración. Para invitar a alguien: Más › Datos. Nuevo en Más › Programas: el catálogo de programas (Pirámide, Jeff Nippard, The Muscle Ladder y otros), que se abre una vez desde su archivo y queda en el teléfono."},
   {n: "2.2", nombre: "Ocho mejoras", fecha: "15 oct 2026", txt: "Pantalla encendida al entrenar, calentamiento de p.224, discos por lado, re-test de la S14 en Semana, registro por lado (búlgara y copenhagen), medidas en Año, historial por ejercicio y volumen hecho contra el plan con la tabla de p.214. Las RPE de varias series se separan con «/» (8 / 8,5), para no confundirlas con decimales."},
   {n: "2.1", nombre: "RPE 5 y atrás", fecha: "15 oct 2026", txt: "El RPE va de 5 a 10 (el plan pide 5–7 en intros y descargas), en botones más grandes; el botón «atrás» del teléfono cierra el registro en vez de salir de la app."},
   {n: "2.0", nombre: "Guardado reforzado", fecha: "15 oct 2026", txt: "Lo que vas anotando sin confirmar (la serie en curso y el registro completo) se guarda al instante en el teléfono: si Android cierra la app, al volver sigue ahí. Notas y peso se guardan sin esperar, y al salir de la app se sube lo pendiente."},
@@ -97,18 +98,32 @@ const ALT = {
 
 /* ── estado local ── */
 const STORE = "exp-app-v1", CFG = "exp-cfg-v1";
+/* ── personas: tú sigues con exponential-datos, tu plan y tus metas. Otra persona entra con su propio
+   repositorio (en tu cuenta) y una clave solo para él: tiene su registro, su perfil y el plan base
+   (data/plan-base.json, sin lo tuyo). ── */
+const TU_REPO = {owner: "Epictetotrades", repo: "exponential-datos"};
+const PERFIL_TUYO = {metaBanca: {kg: 100, reps: 20}, medidas: true};
+let perfil = null, perfilRevisado = false;  // el de otra persona: {nombre, partida, creado}
+let datosLocales = false, recargando = false;
 let st = {actual: 13, rm: [{}, {}, {}, {}, {}], jalon: "", peso: "", medidas: []};
 let LOG = {}, PROG = {};
 let CLAUDE = {};  // comentarios de Claude por semana: claude/wNN.json → {"d2:femoral": {txt}, "dia~d6": {txt}, "semana": {txt}}
 /* Cada cambio pendiente guarda una marca única: si llega otro cambio mientras se sube el anterior,
    la marca cambia y el pendiente no se borra al terminar la subida. */
-let dirty = {estado: false, prog: false, weeks: {}};
+let dirty = {estado: false, prog: false, perfil: false, weeks: {}};
 let progBorrados = [];
 let seq = Date.now();
 const marca = () => ++seq;
-let cfg = {owner: "Epictetotrades", repo: "exponential-datos", token: ""};
+let cfg = {owner: TU_REPO.owner, repo: TU_REPO.repo, token: ""};
 let lastSync = null;
-const ui = {tab: "hoy", week: 13, day: 0, mas: "bloques", dayTouched: false, av: "banca", avPt: null, abierto: undefined, dockCtl: false, calor: {}, rt: {}};
+const ui = {tab: "hoy", week: 13, day: 0, mas: "bloques", dayTouched: false, av: "banca", avPt: null, abierto: undefined, dockCtl: false, calor: {}, rt: {},
+  partida: {}, inv: {}, cat: {obj: "todos", dias: "todos", prog: null, sem: 0, y: 0}};
+const otraPersona = () => !!cfg.token && !(cfg.owner === TU_REPO.owner && cfg.repo === TU_REPO.repo);
+const esTuyo = () => !otraPersona();  // tu plan, tus metas y tus textos
+const storeKey = () => otraPersona() ? `exp-repo-${cfg.owner}/${cfg.repo}` : STORE;  // lo de cada persona, aparte en el teléfono
+/* Cambiar de persona en el mismo teléfono recarga la app; mientras recarga no se guarda nada,
+   para que lo de una persona no quede bajo la clave de otra. */
+function recargar() { recargando = true; location.reload(); }
 
 /* ── tema: se guarda en este teléfono. «auto» sigue el modo claro u oscuro del sistema ── */
 const TEMAS = [
@@ -133,30 +148,35 @@ if (oscuroSistema && oscuroSistema.addEventListener) oscuroSistema.addEventListe
 const loaded = {};
 let sheet = null;
 
+function leerCfg() {
+  try { const c = JSON.parse(localStorage.getItem(CFG) || "null"); if (c) cfg = Object.assign(cfg, c); } catch (e) {}
+}
 function readStore() {
+  leerCfg();
   try {
-    const s = JSON.parse(localStorage.getItem(STORE) || "null");
+    const s = JSON.parse(localStorage.getItem(storeKey()) || "null");
+    datosLocales = !!s;
     if (s) {
       st = Object.assign(st, s.st || {}); LOG = s.LOG || {}; PROG = s.PROG || {}; CLAUDE = s.CLAUDE || {};
-      dirty = Object.assign({estado: false, prog: false, weeks: {}}, s.dirty || {});
+      dirty = Object.assign({estado: false, prog: false, perfil: false, weeks: {}}, s.dirty || {});
       progBorrados = s.progBorrados || [];
       lastSync = s.lastSync || null;
+      if (s.perfil) { perfil = s.perfil; perfilRevisado = true; }
       if (s.ui) { ui.week = s.ui.week || st.actual; ui.mas = s.ui.mas || "bloques"; }
-    }
-    const c = JSON.parse(localStorage.getItem(CFG) || "null");
-    if (c) cfg = Object.assign(cfg, c);
+    } else if (otraPersona()) { st.actual = 1; ui.week = 1; }  // alguien nuevo empieza en la semana 1
   } catch (e) {}
   if (!Array.isArray(st.rm) || st.rm.length < 5) st.rm = [{}, {}, {}, {}, {}];
 }
 function saveStore() {
+  if (recargando) return false;
   try {
-    localStorage.setItem(STORE, JSON.stringify({st, LOG, PROG, CLAUDE, dirty, progBorrados, lastSync, ui: {week: ui.week, mas: ui.mas}}));
+    localStorage.setItem(storeKey(), JSON.stringify({st, LOG, PROG, CLAUDE, dirty, progBorrados, lastSync, perfil, ui: {week: ui.week, mas: ui.mas}}));
     return true;
   } catch (e) { return false; }
 }
 function saveCfg() { try { localStorage.setItem(CFG, JSON.stringify(cfg)); } catch (e) {} }
 
-/* ── sincronización con GitHub ── */
+/* ── sincronización con GitHub: cada persona con su repositorio ── */
 const conectado = () => !!(cfg.token && cfg.owner && cfg.repo);
 let syncState = "local";
 function setSync(s, msg) {
@@ -165,6 +185,7 @@ function setSync(s, msg) {
   b.dataset.s = s;
   $("#sync-txt").textContent = {local: "Local", ok: "Al día", saving: "Guardando", offline: "Sin señal", error: "Revisar"}[s] || s;
   b.title = msg || "";
+  if (puerta() === "cargando" && (s === "error" || s === "offline")) { render(); return; }  // que se vea por qué no entra
   if (ui.tab === "mas" && ui.mas === "datos" && !sheet && !editando()) renderMas();
 }
 /* No se vuelve a dibujar la pantalla mientras escribes: perderías el foco o lo que llevas escrito. */
@@ -215,6 +236,18 @@ async function putFile(path, data, sha) {
   if (r.status === 409 || r.status === 422) { const e = new Error("conflicto"); e.conflict = true; throw e; }
   if (!r.ok) throw await httpErr(r);
 }
+
+/* Invitación a otra persona: el enlace lleva tu usuario y su repositorio (#u=…&r=…), nunca la clave. */
+const appUrl = () => typeof location === "undefined" ? "https://epictetotrades.github.io/exponential/" : location.origin + location.pathname;
+const enlaceInvitacion = repo => `${appUrl()}#u=${encodeURIComponent(TU_REPO.owner)}&r=${encodeURIComponent(repo)}`;
+const enlaceRepoNuevo = repo => "https://github.com/new?" + new URLSearchParams({name: repo, visibility: "private", description: "Registro de Exponential"}).toString();
+function leerInvitacion() {
+  if (typeof location === "undefined") return;
+  const q = new URLSearchParams((location.hash || "").slice(1));
+  if (!q.get("r")) return;
+  ui.inv = {owner: q.get("u") || TU_REPO.owner, repo: q.get("r")};
+  try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
+}
 const weekPath = w => `semanas/w${w}.json`;
 
 let chain = Promise.resolve();
@@ -227,7 +260,7 @@ function pedirGuardado(ms = 700) {
   clearTimeout(flushTimer);
   flushTimer = setTimeout(() => enCola(flush), ms);
 }
-const pendientes = () => (dirty.estado ? 1 : 0) + (dirty.prog ? 1 : 0) + Object.keys(dirty.weeks).length;
+const pendientes = () => (dirty.estado ? 1 : 0) + (dirty.prog ? 1 : 0) + (dirty.perfil ? 1 : 0) + Object.keys(dirty.weeks).length;
 function errorDeRed(e) { return e instanceof TypeError || !navigator.onLine; }
 
 async function flush() {
@@ -236,6 +269,12 @@ async function flush() {
   if (!navigator.onLine) { setSync("offline", "Sin señal: guardado en el teléfono; se sube al volver"); return; }
   setSync("saving", "Guardando…");
   try {
+    if (dirty.perfil && otraPersona()) {
+      const v = dirty.perfil;
+      const r = await getFile("perfil.json");
+      await putFile("perfil.json", perfil, r.sha);
+      if (dirty.perfil === v) dirty.perfil = false;
+    }
     if (dirty.estado) {
       const v = dirty.estado;
       const r = await getFile("estado.json");
@@ -290,6 +329,11 @@ async function pull() {
   if (!navigator.onLine) { setSync("offline", "Sin señal"); return; }
   setSync("saving", "Leyendo tu cuenta…");
   try {
+    if (otraPersona()) {
+      const pf = await getFile("perfil.json");
+      if (pf.data && !dirty.perfil) perfil = pf.data;
+      perfilRevisado = true;
+    }
     const e = await getFile("estado.json");
     if (e.data && !dirty.estado) {
       const v = e.data;
@@ -322,10 +366,11 @@ async function conectar(owner, repo, token) {
   if (r.status === 401) throw new Error("La clave no es válida o ya venció.");
   if (r.status === 404) throw new Error("No encuentro ese repositorio con esa clave. Revisa que la clave tenga acceso a él.");
   if (!r.ok) throw new Error("GitHub respondió " + r.status);
-  const antes = cfg;
-  cfg = {owner, repo, token};
+  const antes = cfg, quienAntes = storeKey();
+  cfg = Object.assign({}, antes, {owner, repo, token});
   try { await getFile("estado.json"); }  // comprueba que la clave puede leer el contenido, no solo ver el repo
   catch (e) { cfg = antes; throw e; }
+  if (storeKey() !== quienAntes) { saveCfg(); recargar(); return; }  // otra persona: su plan y lo suyo, desde cero
   saveCfg();
   Object.keys(loaded).forEach(k => delete loaded[k]);
   await pull();
@@ -422,7 +467,7 @@ function cargaSugerida(s, it, hid) {
   if (hid && hid !== it.ex) { const p = PROG[hid]; return p ? (p.next || p.kg || "") : ""; }
   let planKg = "";
   if (it.k === "main") planKg = r25(rmDe(s.w, it.lift) * it.pct / 100);
-  else if (it.k === "amrap") planKg = 100;
+  else if (it.k === "amrap") planKg = cargaAmrap(s);
   else if (it.k === "single") planKg = r25(rmDe(s.w, it.lift) * 0.9);
   else if (it.kg) planKg = it.kg;
   const pr = it.k === "acc" && PROG[it.ex];
@@ -469,7 +514,7 @@ function resumen(sets) {
   return base + (rpes.length ? ` · RPE ${rpes.map(f).join(" / ")}` : "");  // con «, » no se distingue 8, 8,5 de 8,8
 }
 /* S1–S10 se rediseñaron con la Pirámide cuando ya habían pasado: quedan como plantilla, no como pendientes. */
-const esPlantilla = w => w <= 10 && w < st.actual;
+const esPlantilla = w => esTuyo() && w <= 10 && w < st.actual;
 function estadoItem(s, it, prev) {
   if (registrado(prev)) {
     if (prev.omitido) return ["omi", "No lo hice"];
@@ -503,10 +548,14 @@ function colorSemana(s) {
 }
 function etiqueta(s) { return s.viejo ? s.bloque : s.etiqueta + (s.pos ? " " + s.pos : ""); }
 function ciclo(s) { return CICLOS.find(c => s.w >= c.w[0] && s.w <= c.w[1]); }
+const cicloD = c => c.id === "C1" && !esTuyo() ? "S1–S10 Pirámide · S11–S18 dos olas de intensidad" : c.d;
+/* AMRAP de banca en los tests: tu meta son 100 kg. A otra persona, el 70 % de su máximo: el último tramo
+   de la tabla de p.64 (11–12 reps), para que el resultado caiga dentro de la tabla. */
+const cargaAmrap = s => esTuyo() ? PERFIL_TUYO.metaBanca.kg : r25(rmDe(s.w, "banca") * 0.7);
 function planTxt(s, it) {
   if (it.k === "main") return `${it.sets} × ${it.reps} · ${kg(r25(rmDe(s.w, it.lift) * it.pct / 100))} · RPE ${it.rpe}`;
   if (it.k === "single") { const rm = rmDe(s.w, it.lift); return `${kg(r25(rm * .8))} → ${kg(r25(rm * .9))} → single a RPE ${it.rpe}`; }
-  if (it.k === "amrap") return "1 serie al máximo con 100 kg";
+  if (it.k === "amrap") return `1 serie al máximo con ${kg(cargaAmrap(s))}`;
   if (it.k === "pot") return it.pres + (it.pct ? " · " + kg(r25(rmDe(s.w, it.lift) * it.pct / 100)) : "");
   const pr = PROG[it.ex], usaReg = pr && pr.w < s.w && pr.reps === String(it.reps) && pr.next;
   const carga = it.pc ? " · peso corporal" : usaReg ? ` · ≈ ${kg(pr.next)}` : it.kg ? ` · ≈ ${kg(it.kg)}` : "";
@@ -523,8 +572,8 @@ function detalleTxt(s, it) {
   } else if (it.k === "single") {
     sub.push(`Sube por el 80 % y el 90 % de ${f(rmDe(s.w, it.lift))}; el último, a RPE 8–9, sin llegar al fallo (p.118). Anota carga y RPE y la app estima tu máximo.`);
   } else if (it.k === "amrap") {
-    const b = rmDe(s.w, "banca");
-    sub.push(`Tu meta. Con asistente o barras de seguridad: aquí el fallo tiene un propósito (p.67). Con un 1RM de ${f(b)}, la tabla de p.64 da ≈ ${repsTxt(repsDePct(100 / b * 100))} reps.`);
+    const b = rmDe(s.w, "banca"), a = cargaAmrap(s);
+    sub.push(`${esTuyo() ? "Tu meta." : "Test de repeticiones."} Con asistente o barras de seguridad: aquí el fallo tiene un propósito (p.67). Con un 1RM de ${f(b)}, la tabla de p.64 da ≈ ${repsTxt(repsDePct(a / b * 100))} reps con ${kg(a)}.`);
   } else if (it.k === "acc") {
     const pr = PROG[it.ex], usaReg = pr && pr.w < s.w && pr.reps === String(it.reps) && pr.next;
     if (usaReg) sub.push(`Según tu registro de S${pr.w} (${kg(pr.kg)}): ${pr.motivo}.`);
@@ -532,10 +581,11 @@ function detalleTxt(s, it) {
     else if (it.desde) sub.push(it.desde.charAt(0).toUpperCase() + it.desde.slice(1) + (it.desde.startsWith("desde") ? " (convertida con la tabla de p.64)." : "."));
     else if (!it.pc) sub.push("Elige la carga que te deje en ese RPE.");
     if (it.aps) sub.push(`En par con ${it.aps}, ~1 min entre series (p.179).`);
-    if (it.lado) sub.push("Por lado: anota cada lado por separado, empezando por el izquierdo.");
+    if (it.lado) sub.push(`Por lado: anota cada lado por separado, empezando por el ${esTuyo() ? "izquierdo" : "más débil"}.`);
   }
   const a = ALT[it.ex];
-  if (a) sub.push(`Si hoy no va: ${a.op.map(o => o[1]).join(" o ")}${a.c ? " — " + a.c : ""}. Elígela en «Hiciste» y carga por RPE.`);
+  const ac = a && (esTuyo() || !/tu preferida/.test(a.c)) ? a.c : "";  // «la máquina es tu preferida» es tuyo
+  if (a) sub.push(`Si hoy no va: ${a.op.map(o => o[1]).join(" o ")}${ac ? " — " + ac : ""}. Elígela en «Hiciste» y carga por RPE.`);
   return sub;
 }
 
@@ -749,7 +799,7 @@ function renderHoy() {
     ${extras.length ? `<h2>Extras</h2><div class="lista">${extras.map((x, i) => `<div class="row"><div class="ex-h"><b class="nombre">${esc(x.n)}</b><button class="btn quiet chico" data-delx="${d.id}" data-i="${i}">Borrar</button></div>
       <div class="kv"><span class="k">HECHO</span><span class="v fuerte">${esc(resumen(x.sets))}</span></div></div>`).join("")}</div>` : ""}
     <div class="acciones"><button class="btn ghost" data-extra-open="${d.id}">Añadir ejercicio extra</button></div>
-    <label class="fl notas">Notas del día<textarea class="inp" rows="3" data-dn="${d.id}" placeholder="Sueño, cansancio, tenis ese día, cambios de orden… (se guarda solo)">${esc(nd && nd.txt ? nd.txt : "")}</textarea></label>`;
+    <label class="fl notas">Notas del día<textarea class="inp" rows="3" data-dn="${d.id}" placeholder="Sueño, cansancio, ${esTuyo() ? "tenis" : "deporte"} ese día, cambios de orden… (se guarda solo)">${esc(nd && nd.txt ? nd.txt : "")}</textarea></label>`;
 }
 /* Mientras escribes no se redibuja: solo se actualizan los números, el RPE y la barra. */
 function pintarEditor() {
@@ -856,7 +906,7 @@ function renderSemana() {
     ${notas.length ? `<h2>Tus notas</h2><div class="notas-l">${notas.map(([t, x]) => `<div class="nota-i"><span class="k">${esc(t)}</span><p>“${esc(x)}”</p></div>`).join("")}</div>` : ""}
     ${faltan.length ? `<h2>Sin registrar · ${faltan.length}</h2><div class="chips">${faltan.map(x => `<span class="pill fal">${esc(x)}</span>`).join("")}</div>` : ""}
     <h2>Volumen ${s.w === st.actual ? "de esta semana" : "de la semana"}</h2>
-    <p class="small mut">Series por músculo con la tabla de <span class="pg">p.214</span>: primario 1, secundario 0,5 (tu regla). ${!plantilla && s.w <= st.actual ? `El borde es el plan; el relleno, lo que anotaste.${s.w < st.actual ? " En color, donde faltaron 2 series o más." : ""} ` : ""}La franja es el rango 10–20 <span class="pg">p.62</span>. El día de potencia no cuenta <span class="pg">p.139</span>.</p>
+    <p class="small mut">Series por músculo con la tabla de <span class="pg">p.214</span>: primario 1, secundario 0,5 (${esTuyo() ? "tu regla" : "regla de Pelland 2026"}). ${!plantilla && s.w <= st.actual ? `El borde es el plan; el relleno, lo que anotaste.${s.w < st.actual ? " En color, donde faltaron 2 series o más." : ""} ` : ""}La franja es el rango 10–20 <span class="pg">p.62</span>. El día de potencia no cuenta <span class="pg">p.139</span>.</p>
     ${barras(volumenSemana(s, false), !plantilla && s.w <= st.actual ? volumenSemana(s, true) : null, s.w < st.actual)}
     ${s.w !== st.actual ? `<div class="acciones"><button class="btn" data-actual="${s.w}">Marcar la semana ${s.w} como actual</button></div>` : ""}`;
 }
@@ -887,10 +937,11 @@ function metaBanca() {
 const MEDIDAS = [["brazo", "Brazo"], ["hombros", "Hombros"], ["pecho", "Pecho"], ["cintura", "Cintura"], ["muslo", "Muslo"]];
 const fechaTxt = iso => { try { return new Date(iso + "T12:00:00").toLocaleDateString("es", {day: "numeric", month: "short", year: "numeric"}); } catch (e) { return iso; } };
 function medidasHtml() {
-  const M = st.medidas || [], ult = M[M.length - 1], pri = M[0];
-  const fila = (id, n, meta) => {
+  const M = st.medidas || [], ult = M[M.length - 1], pri = M[0], metas = esTuyo() && PERFIL_TUYO.medidas;  // las metas son las tuyas
+  const fila = (id, n, conMeta) => {
     const v = ult ? num(ult[id]) : null, v0 = pri ? num(pri[id]) : null, d = v != null && v0 != null && M.length > 1 ? v - v0 : null;
-    return `<div class="kpi"><span class="k">${n} · ${meta ? "meta +2 cm" : "mantener"}</span><div class="n">${v != null ? f(v) + " cm" : "—"}</div>${d != null
+    const meta = metas && conMeta;
+    return `<div class="kpi"><span class="k">${n}${metas ? " · " + (meta ? "meta +2 cm" : "mantener") : ""}</span><div class="n">${v != null ? f(v) + " cm" : "—"}</div>${d != null
       ? `<div class="d">${d >= 0 ? "+" : ""}${f(d)} cm desde el ${esc(fechaTxt(pri.f))}${meta ? ` · ${Math.max(0, Math.min(100, Math.round(d / 2 * 100)))} % de la meta` : ""}</div>`
       : `<div class="d">${M.length ? "Con una segunda medición verás el cambio." : "Aún sin medir."}</div>`}</div>`;
   };
@@ -903,11 +954,11 @@ function medidasHtml() {
 function tablaMaximos() {
   const rows = TRAMOS.map((t, i) => `<tr><td><b class="mono">${t.d}</b><br><span class="small mut">${t.s}</span></td>${LIFTS.map(([id]) => {
     const v = st.rm[i] && st.rm[i][id] ? st.rm[i][id] : "";
-    const ph = i === 0 ? DATA.rm_inicial[id] : rmDe(TRAMOS[i - 1].desde, id);
+    const ph = i === 0 ? DATA.rm_inicial[id] ?? "" : rmDe(TRAMOS[i - 1].desde, id) || "";
     return `<td class="n"><input class="inp" type="text" inputmode="decimal" value="${esc(v)}" placeholder="${ph}" data-rm="${i}" data-lift="${id}" aria-label="${id} ${t.d}"></td>`;
-  }).join("")}<td class="n">${i === 0 ? "—" : `<input class="inp" type="text" inputmode="numeric" value="${esc(st.rm[i] && st.rm[i].amrap ? st.rm[i].amrap : "")}" placeholder="reps" data-rm="${i}" data-lift="amrap" aria-label="AMRAP 100 kg ${t.d}">`}</td></tr>`).join("");
+  }).join("")}<td class="n">${i === 0 ? "—" : `<input class="inp" type="text" inputmode="numeric" value="${esc(st.rm[i] && st.rm[i].amrap ? st.rm[i].amrap : "")}" placeholder="reps" data-rm="${i}" data-lift="amrap" aria-label="AMRAP de banca ${t.d}">`}</td></tr>`).join("");
   return `<div class="tw rm"><table><thead><tr><th>Semanas</th><th class="n">Banca</th><th class="n">Sent.</th><th class="n">P. muerto</th><th class="n">AMRAP</th></tr></thead><tbody>${rows}</tbody></table></div>
-  <label class="fl" style="margin-top:12px">Jalón (S11–S18) <input class="inp mono" type="text" inputmode="decimal" value="${esc(st.jalon)}" placeholder="${DATA.rm_inicial.jalon}" data-jalon="1" style="max-width:140px"></label>`;
+  <label class="fl" style="margin-top:12px">Jalón (S11–S18) <input class="inp mono" type="text" inputmode="decimal" value="${esc(st.jalon)}" placeholder="${DATA.rm_inicial.jalon ?? ""}" data-jalon="1" style="max-width:140px"></label>`;
 }
 function renderAno() {
   cargarHistorial();
@@ -916,7 +967,7 @@ function renderAno() {
   const b = rmDe(st.actual, "banca");
   const ciclos = CICLOS.map(c => {
     const ws = W.filter(x => x.w >= c.w[0] && x.w <= c.w[1]);
-    return `<div class="cyc"><div class="cyc-h"><h3>${esc(c.n)}</h3><span class="small mut">S${c.w[0]}–S${c.w[1]} · ${esc(c.d)}</span></div>
+    return `<div class="cyc"><div class="cyc-h"><h3>${esc(c.n)}</h3><span class="small mut">S${c.w[0]}–S${c.w[1]} · ${esc(cicloD(c))}</span></div>
       <div class="cells">${ws.map(x => `<button class="cell${x.w < st.actual ? " done" : ""}${x.w === st.actual ? " now" : ""}${TESTS.includes(x.w) ? " t" : ""}" style="background:${colorSemana(x)}" data-goweek="${x.w}" aria-label="Semana ${x.w}: ${esc(etiqueta(x))}">${x.w}</button>`).join("")}</div>
       <p class="small mut" style="margin-top:8px">${resumenBloques(ws)}</p></div>`;
   }).join("");
@@ -934,15 +985,15 @@ function renderAno() {
       <span><i class="sw" style="background:var(--f-int)"></i>Intensidad</span><span><i class="sw" style="background:var(--f-taper)"></i>Taper</span>
       <span><i class="sw" style="background:var(--f-test)"></i>Test</span>
     </div>
-    <h2>Tu meta de banca</h2>${metaBanca()}
+    ${esTuyo() ? `<h2>Tu meta de banca</h2>${metaBanca()}` : ""}
     <h2>Medidas</h2>${medidasHtml()}
     <h2>Tus máximos</h2>
     <p class="small mut">Las cargas de cada tramo salen de estos números. Después de cada test, anota el resultado y las semanas siguientes se recalculan solas. Una casilla vacía usa la de arriba.</p>
     ${tablaMaximos()}
     <h2>¿Cuántas veces se repite el ciclo?</h2>
-    <div class="rule"><p><b>Cuatro veces.</b> Acumulación, intensificación y test dejan entre 8 y 16 semanas de un test al siguiente en el programa avanzado del libro <span class="pg">p.248</span>. Por cómo progresas, el libro te pone en intermedio <span class="pg">p.109, p.114</span>, así que caben cuatro: S1–S18, S19–S31, S32–S44 y S45–S52.</p>
+    <div class="rule"><p><b>Cuatro veces.</b> Acumulación, intensificación y test dejan entre 8 y 16 semanas de un test al siguiente en el programa avanzado del libro <span class="pg">p.248</span>. ${esTuyo() ? "Por cómo progresas, el libro te pone en intermedio" : "Para un intermedio"} <span class="pg">p.109, p.114</span>, así que caben cuatro: S1–S18, S19–S31, S32–S44 y S45–S52.</p>
     <p><b>No es repetir lo mismo.</b> Cada vuelta parte con los máximos del test anterior, así que las cargas suben <span class="pg">p.110–111, p.243</span>. El énfasis alterna entre hipertrofia y fuerza <span class="pg">p.256–257</span>, y los compuestos de apoyo pueden cambiar entre mesociclos <span class="pg">p.218</span>.</p>
-    <p class="small mut">S1–S10 siguen el ciclo de 8 semanas del libro con una semana intro y el taper aparte <span class="pg">p.104–105, p.132, p.136</span>. S11–S18 es tu fuerza renovada y no se toca, porque vienes progresando <span class="pg">p.122</span>.</p></div>`;
+    <p class="small mut">S1–S10 siguen el ciclo de 8 semanas del libro con una semana intro y el taper aparte <span class="pg">p.104–105, p.132, p.136</span>. ${esTuyo() ? `S11–S18 es tu fuerza renovada y no se toca, porque vienes progresando <span class="pg">p.122</span>.` : `S11–S18 son dos olas de intensidad con re-test en la S14 y test en la S18 <span class="pg">p.248</span>.`}</p></div>`;
 }
 
 /* ── avance: máximo estimado por semana (tabla de p.64, solo series con RPE) ── */
@@ -988,7 +1039,7 @@ function avanceHtml() {
   const faltan = (sinRpe.length ? ` Sin RPE: ${sinRpe.map(w => "S" + w).join(", ")}.` : "") + (margen.length ? ` Con demasiado margen para estimar: ${margen.map(w => "S" + w).join(", ")}.` : "");
   const seg = `<div class="seg" role="group" aria-label="Levantamiento" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:0">${Object.entries(LIFT_N).map(([id, n]) => `<button data-av="${id}" aria-pressed="${id === lift}">${n}</button>`).join("")}</div>`;
   const ultimo = pts[pts.length - 1];
-  const meta = lift === "banca" ? (() => {
+  const meta = lift === "banca" && esTuyo() ? (() => {
     const v = ultimo ? ultimo.v : ref;
     return `<p class="small" style="margin:8px 0 0;color:var(--tx2)">Con 100 kg hoy ≈ <b class="mono">${repsTxt(repsDePct(100 / v * 100))} reps</b> (p.64). Tu meta: <b class="mono">20</b>.</p>`;
   })() : "";
@@ -1124,9 +1175,14 @@ const BLOQUES = [
   {c: "C4", t: "Intensidad", w: "S49–S51", col: "var(--f-int)", x: "Pesado 5-4-3 al 82,5-85-87,5 %, volumen 9-8-7 al 67,5-70-72,5 % (p.270–272)."},
   {c: "C4", t: "Taper y test del año", w: "S52", col: "var(--f-test)", x: "La semana 8 de p.132 junta taper y test. El AMRAP con 100 kg cierra el año; el AMRAP es el test que el libro usa para hipertrofia (p.136)."},
 ];
+/* A otra persona: sin tu M3 ni tu meta de 100 kg (el AMRAP va al 70 % de su máximo, ver cargaAmrap). */
+const bloqueX = b => esTuyo() ? b.x : b.w === "S11–S18"
+  ? "Dos olas de intensificación (S11–S13 y S15–S17), descarga con re-test en S14 y test en S18. El libro pone uno o dos bloques de intensidad tras la acumulación, con test al final (p.248)."
+  : b.x.replace(/AMRAP con 100 kg/g, "AMRAP con el 70 % de tu máximo");
+const bloqueT = b => !esTuyo() && b.w === "S11–S18" ? "Fuerza · dos olas" : b.t;
 function masBloques() {
   return CICLOS.map(c => `<h2>${esc(c.n)} <span class="small mut mono">S${c.w[0]}–S${c.w[1]}</span></h2>${BLOQUES.filter(b => b.c === c.id).map(b => `
-    <div class="rule"><h3><i class="sw" style="background:${b.col}"></i>${esc(b.t)} <span class="small mut mono">${b.w}</span></h3><p>${esc(b.x)}</p></div>`).join("")}`).join("");
+    <div class="rule"><h3><i class="sw" style="background:${b.col}"></i>${esc(bloqueT(b))} <span class="small mut mono">${b.w}</span></h3><p>${esc(bloqueX(b))}</p></div>`).join("")}`).join("");
 }
 function masVolumen() {
   const VP = W.map(s => volumenSemana(s, false));  // el mismo cálculo que Semana (p.214)
@@ -1136,11 +1192,12 @@ function masVolumen() {
     const c = v < 10 ? "h-bajo" : v > 20 ? "h-sobre" : "h-en";
     return `<td class="${c}${s.w === 11 || s.w === 19 ? " sep" : ""}">${f(v)}</td>`;
   }).join("")}</tr>`).join("");
-  return `<p class="small mut" style="margin-top:16px">Las rayas separan S1–S10 (Pirámide), S11–S18 (tu M3) y el plan nuevo desde S19. Tono claro: bajo 10. Medio: 10–20. Fuerte: sobre 20. Desliza la tabla hacia los lados.</p>
+  const tuyo = esTuyo();
+  return `<p class="small mut" style="margin-top:16px">Las rayas separan S1–S10 (Pirámide), S11–S18 (${tuyo ? "tu M3" : "dos olas de intensidad"}) y el plan nuevo desde S19. Tono claro: bajo 10. Medio: 10–20. Fuerte: sobre 20. Desliza la tabla hacia los lados.</p>
     <div class="tw"><table class="heat"><thead>${head}</thead><tbody>${body}</tbody></table></div>
-    <div class="rule"><h3>Cómo se cuenta</h3><p>Cada serie directa vale 1 y cada indirecta 0,5: es tu regla (Pelland 2026). Qué es directo y qué indirecto sale de la tabla de músculos de p.214. <b>Conflicto de fuentes:</b> el libro cuenta primario y secundario igual (p.213), así que con su conteo estos números serían más altos. El día de potencia no cuenta (p.139, p.49).</p></div>
-    <div class="rule"><h3>Rango y por qué no va más alto</h3><p>10–20 series por músculo y semana (p.62); para intermedio, 13–15 de partida (p.208). Con tenis tres veces por semana hay fatiga de afuera, y el volumen óptimo baja (p.61). Por eso casi todo queda entre 10 y 17, y la prioridad (brazos, hombros, isquios) sube primero.</p></div>
-    <div class="rule"><h3>Dorsal en 8</h3><p>Es el costo de tu decisión de un solo día de espalda. Si la espalda no avanza, es lo primero a revisar.</p></div>`;
+    <div class="rule"><h3>Cómo se cuenta</h3><p>Cada serie directa vale 1 y cada indirecta 0,5: ${tuyo ? "es tu regla (Pelland 2026)" : "la regla de Pelland 2026"}. Qué es directo y qué indirecto sale de la tabla de músculos de p.214. <b>Conflicto de fuentes:</b> el libro cuenta primario y secundario igual (p.213), así que con su conteo estos números serían más altos. El día de potencia no cuenta (p.139, p.49).</p></div>
+    <div class="rule"><h3>Rango y por qué no va más alto</h3><p>10–20 series por músculo y semana (p.62); para intermedio, 13–15 de partida (p.208). ${tuyo ? "Con tenis tres veces por semana hay fatiga de afuera, y el volumen óptimo baja (p.61). Por eso casi todo queda entre 10 y 17, y la prioridad (brazos, hombros, isquios) sube primero." : "Si haces otro deporte, hay fatiga de afuera y el volumen óptimo baja (p.61). El plan deja casi todo entre 10 y 17, con brazos, hombros e isquios como prioridad."}</p></div>
+    <div class="rule"><h3>Dorsal en 8</h3><p>${tuyo ? "Es el costo de tu decisión de un solo día de espalda." : "El plan junta la espalda en un solo día."} Si la espalda no avanza, es lo primero a revisar.</p></div>`;
 }
 function masReglas() {
   const p64 = P64.map(([r, p]) => `<tr><td class="n">${p} %</td><td class="n">${r === 3.5 ? "3–4" : r === 5.5 ? "5–6" : r === 7.5 ? "7–8" : r === 9.5 ? "9–10" : r === 11.5 ? "11–12" : r}</td></tr>`).join("");
@@ -1176,22 +1233,43 @@ function masReglas() {
     <div class="rule"><h3>Cargas</h3><p>Los básicos van en % del máximo más un rango de RPE. Si la primera serie no cae en el rango, ajustas las siguientes (p.66, p.217, p.246). Redondeo a 2,5 kg. Cada % se revisó contra la tabla de p.64.</p></div>
     <div class="rule"><h3>Accesorios: doble progresión</h3><p>Carga fija y sumas reps dentro del rango. Cuando todas las series llegan al tope, subes el menor incremento (p.111–113). La app lo calcula sola cuando registras.</p></div>
     <div class="rule"><h3>Si pierdes sesiones</h3><p>Retomas donde quedaste y el plan termina unos días después. No se juntan sesiones (p.37). Si un día estás agotado, haz la sesión más liviana de la semana (p.36). Una semana de viaje o enfermedad se toma como descarga.</p></div>
-    <div class="rule"><h3>Tenis de mesa</h3><p>Pesas y tenis compiten por recuperación: uno tiene prioridad y el otro se modera (p.39). No juegues fuerte justo antes de entrenar; después de las pesas, 6 h después o en otro día es mejor (p.40).</p></div>
-    <div class="rule"><h3>Potencia y sprints</h3><p>Potencia es mover cargas livianas lo más rápido posible, lo que más transfiere a un deporte con raqueta (p.127). El día de potencia es de poco volumen, para recuperar (p.139).</p></div>
+    ${esTuyo() ? `<div class="rule"><h3>Tenis de mesa</h3><p>Pesas y tenis compiten por recuperación: uno tiene prioridad y el otro se modera (p.39). No juegues fuerte justo antes de entrenar; después de las pesas, 6 h después o en otro día es mejor (p.40).</p></div>`
+      : `<div class="rule"><h3>Otro deporte</h3><p>Pesas y deporte compiten por recuperación: uno tiene prioridad y el otro se modera (p.39). No hagas el deporte fuerte justo antes de entrenar; después de las pesas, 6 h después o en otro día es mejor (p.40).</p></div>`}
+    <div class="rule"><h3>Potencia y sprints</h3><p>Potencia es mover cargas livianas lo más rápido posible, lo que más transfiere a ${esTuyo() ? "un deporte con raqueta" : "un deporte"} (p.127). El día de potencia es de poco volumen, para recuperar (p.139).</p></div>
     <div class="rule"><h3>Año 2</h3><p>Misma estructura. Si un músculo o levantamiento no avanza en dos ciclos, +1–2 series ahí (p.125). Si el progreso pasa a verse solo mes a mes o más lento, aplicas los criterios de avanzado (p.114): ciclos más largos y menos tests (p.117).</p></div>
     <h2>Lo que no sale del libro</h2>
     <div class="rule"><ul>
       <li>Los sprints (al inicio del día 4): el libro no los trata.</li>
-      <li>El orden de los énfasis (hipertrofia, fuerza, cierre). El libro permite alternar (p.256–257); el orden se eligió por tus metas.</li>
+      <li>El orden de los énfasis (hipertrofia, fuerza, cierre). El libro permite alternar (p.256–257); el orden se eligió por ${esTuyo() ? "tus metas" : "las metas de quien armó el plan"}.</li>
       <li>La cuarta semana de intensificación de C2 alarga la tabla de p.270–272 hasta donde p.135 dice que termina el bloque.</li>
-      <li>Las cargas de referencia de accesorios suponen que trabajabas a RPE ~8.</li>
+      ${esTuyo() ? "<li>Las cargas de referencia de accesorios suponen que trabajabas a RPE ~8.</li>" : ""}
     </ul></div>`;
 }
 /* GitHub no deja crear claves por API (solo el dueño, desde la web), pero sí rellenar el formulario por enlace. */
-function enlaceClave() {
-  const q = new URLSearchParams({name: "exponential-app", description: "App Exponential: lee y guarda tus registros",
+function enlaceClave(nombre = "exponential-app", para = "tus registros") {
+  const q = new URLSearchParams({name: nombre, description: "App Exponential: lee y guarda " + para,
     target_name: cfg.owner, expires_in: "366", contents: "write"});
   return "https://github.com/settings/personal-access-tokens/new?" + q.toString();
+}
+/* Invitar a otra persona: su repositorio privado en tu cuenta y una clave solo para él. Ella no necesita cuenta de GitHub. */
+function invitarHtml() {
+  const r = ui.inv.nuevo || "";
+  return `<h2>Invitar a otra persona</h2>
+    <div class="panel">
+      <label class="fl">Nombre de su repositorio<input class="inp mono" data-invrepo value="${esc(r)}" placeholder="exponential-nombre" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+      <div class="pasos-inv">
+        <button class="btn" data-inv="repo">1 · Crear su repositorio</button>
+        <button class="btn" data-inv="clave">2 · Crear su clave</button>
+        <button class="btn pri" data-inv="enlace">3 · Copiar su enlace</button>
+      </div>
+      ${ui.inv.enlace ? `<p class="small mono" style="margin:10px 0 0;word-break:break-all;user-select:all">${esc(ui.inv.enlace)}</p>` : ""}
+      <ol class="small" style="padding-left:18px;color:var(--tx2);line-height:1.6;margin:12px 0 0">
+        <li>Se abre GitHub con el nombre puesto y «Private» elegido: toca <b>Create repository</b>.</li>
+        <li>En la clave, en «Repository access» elige <b>Only select repositories</b> y su repositorio; abajo, <b>Generate token</b>, y cópiala.</li>
+        <li>Mándale por correo su enlace y, aparte, la clave. Ella abre el enlace, pega la clave y toca Conectar.</li>
+      </ol>
+      <p class="small mut" style="margin-top:10px">Al entrar pone su nombre y una serie de cada básico, y la app arma su plan con el plan base, sin tus datos. Su clave abre solo su repositorio.</p>
+    </div>`;
 }
 function masDatos() {
   const hora = lastSync ? new Date(lastSync).toLocaleString("es", {dateStyle: "short", timeStyle: "short"}) : "nunca";
@@ -1202,12 +1280,14 @@ function masDatos() {
       <div class="grid2"><span class="k">ESTADO</span><span class="v strong">${esc(estado)}</span>
       ${syncState === "error" && msg ? `<span class="k">DETALLE</span><span class="v">${esc(msg)}</span>` : ""}
       <span class="k">CUENTA</span><span class="v">${esc(cfg.owner)}/${esc(cfg.repo)}</span>
+      ${perfil && perfil.nombre ? `<span class="k">NOMBRE</span><span class="v">${esc(perfil.nombre)}</span>` : ""}
       <span class="k">ÚLTIMO</span><span class="v">${esc(hora)}</span>
       <span class="k">PENDIENTE</span><span class="v">${pendientes() ? pendientes() + " cambio(s) por subir" : "nada"}</span></div>
     </div>
     <div class="btn-row" style="margin-top:14px"><button class="btn pri" data-syncnow>Sincronizar ahora</button><button class="btn" data-export>Descargar respaldo</button></div>
     <div class="btn-row" style="margin-top:8px"><button class="btn quiet" data-disconnect>Desconectar este teléfono</button></div>
-    <p class="small mut" style="margin-top:14px">Cada registro se guarda primero en el teléfono y luego en tu repositorio privado. Claude lee ese repositorio cuando le pides revisar tu registro.</p>`;
+    <p class="small mut" style="margin-top:14px">Cada registro se guarda primero en el teléfono y luego en ${esTuyo() ? "tu" : "su"} repositorio privado. Claude lo lee cuando se le pide revisar el registro, y deja comentarios en Hoy y en Semana.</p>
+    ${esTuyo() ? invitarHtml() : ""}`;
   return `
     <div class="panel" style="margin-top:16px">
       <p><b>Ahora tu registro se guarda solo en este teléfono.</b> Conéctalo a tu cuenta para no perderlo y para que Claude pueda revisarlo.</p>
@@ -1239,12 +1319,135 @@ function masTema() {
   ${tema.modo === "auto" ? `<div class="calc2"><label class="fl">De día<select class="inp" data-tema-claro>${op("claro", tema.claro)}</select></label><label class="fl">De noche<select class="inp" data-tema-oscuro>${op("oscuro", tema.oscuro)}</select></label></div>` : ""}
   <p class="small mut" style="margin-top:12px">Se guarda en este teléfono. Tus registros no cambian.</p>`;
 }
+/* ── Programas: el catálogo para elegir programa. No viaja con la app pública (trae programas de libros):
+   se abre una vez desde el archivo exponential-catalogo.json y queda guardado en el teléfono, en su propia
+   caché, aparte de la de la app (esa se renueva en cada versión; esta no). ── */
+let CATALOGO = null, catEstado = "";  // catEstado: "" · "cargando" · "falta" (no está en el teléfono) · "sin-cache" (el navegador no deja guardarlo)
+const FICHAS = {};
+const CAT_CACHE = "exp-catalogo", CAT_FORMATO = "exponential-catalogo";
+const CAT_OBJ = [["todos", "Todos"], ["fuerza", "Fuerza"], ["hipertrofia", "Hipertrofia"], ["ambos", "Fuerza e hipertrofia"], ["musculo", "Un músculo"]];
+const CAT_DIAS = [["todos", "Todos"], ["2-3", "2–3"], ["4", "4"], ["5", "5"], ["6", "6"]];
+const catUrl = p => new URL("catalogo/" + p, location.href).href;
+async function leerCat(p) {
+  const r = await (await caches.open(CAT_CACHE)).match(catUrl(p));
+  return r ? r.json() : null;
+}
+async function cargarCatalogo() {
+  if (CATALOGO || catEstado) return;
+  catEstado = "cargando";
+  try { CATALOGO = await leerCat("indice.json"); catEstado = CATALOGO ? "" : "falta"; } catch (e) { catEstado = "sin-cache"; }
+  if (ui.tab === "mas" && ui.mas === "programas") renderMas();
+}
+async function cargarFicha(id) {
+  if (FICHAS[id]) return;
+  let P = null; try { P = await leerCat(encodeURIComponent(id) + ".json"); } catch (e) {}
+  if (P) FICHAS[id] = P;
+  else { CATALOGO = null; catEstado = "falta"; ui.cat.prog = null; }  // el teléfono borró el catálogo: se vuelve a abrir el archivo
+  if (ui.tab === "mas" && ui.mas === "programas") renderMas();
+}
+/* Abrir el archivo: se revisa que sea el catálogo, se guarda cada programa y el índice al final
+   (si algo falla a mitad de camino, no queda un índice que apunte a programas que no están). */
+async function importarCatalogo(file) {
+  let C = null;
+  try { C = JSON.parse(await file.text()); } catch (e) {}
+  const valido = C && C.formato === CAT_FORMATO && Array.isArray(C.grupos) && Array.isArray(C.programas) && C.programas.length
+    && C.programas.every(p => p && typeof p.id === "string" && /^[a-z0-9-]+$/.test(p.id) && typeof p.nombre === "string" && typeof p.fuente === "string"
+      && Array.isArray(p.plan) && p.plan.length && p.plan.every(s => s && Array.isArray(s.d) && s.d.every(d => d && Array.isArray(d.e))));
+  if (!valido) { toast("Ese archivo no es el catálogo de Exponential."); return; }
+  if (typeof caches === "undefined") { toast("Este navegador no deja guardar el catálogo. Abre la app en Chrome."); return; }
+  const indice = {version: String(C.version || ""), grupos: C.grupos, programas: C.programas.map(({plan, progresion, aviso, ...meta}) => meta)};
+  const json = x => new Response(JSON.stringify(x), {headers: {"Content-Type": "application/json"}});
+  try {
+    const c = await caches.open(CAT_CACHE);
+    await Promise.all((await c.keys()).map(k => c.delete(k)));  // la versión nueva reemplaza entera a la anterior
+    await Promise.all(C.programas.map(p => c.put(catUrl(encodeURIComponent(p.id) + ".json"), json(p))));
+    await c.put(catUrl("indice.json"), json(indice));
+  } catch (e) { toast("No pude guardar el catálogo en el teléfono."); return; }
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}  // que Android no lo borre por falta de espacio
+  CATALOGO = indice; catEstado = ""; ui.cat.prog = null;
+  Object.keys(FICHAS).forEach(k => delete FICHAS[k]);
+  renderMas(); window.scrollTo(0, 0);
+  toast(`Catálogo guardado en el teléfono: ${C.programas.length} programas.`);
+}
+const botonArchivo = (txt, cls) => `<label class="${cls}">${txt}<input type="file" id="cat-file" hidden></label>`;
+function archivoHtml() {
+  if (catEstado === "sin-cache") return `<p class="small mut" style="margin-top:16px">Este navegador no deja guardar el catálogo. Abre la app en Chrome.</p>`;
+  return `<div class="panel" style="margin-top:16px">
+      <p style="margin:0"><b>El catálogo no viene dentro de la app.</b> Se abre una vez desde el archivo <span class="mono">exponential-catalogo.json</span> y queda guardado en este teléfono.</p>
+      ${botonArchivo("Abrir el archivo del catálogo", "btn pri btn-archivo")}
+      <ol class="small" style="padding-left:18px;color:var(--tx2);line-height:1.6;margin:12px 0 0">
+        <li>Guarda el archivo en el teléfono (desde el correo queda en Descargas) o déjalo en tu Drive.</li>
+        <li>Toca el botón: se abre el explorador de archivos. Busca el archivo y tócalo.</li>
+      </ol>
+    </div>`;
+}
+const semTxt = p => p.semanas ? `${p.semanas} sem` : "semana tipo";
+const diasDe = t => (String(t).match(/\d+/g) || []).map(Number);
+function pasaFiltro(p) {
+  const {obj, dias} = ui.cat;
+  if (obj !== "todos" && p.objetivo !== obj) return false;
+  if (dias !== "todos" && !diasDe(p.dias).some(n => diasDe(dias.replace("-", " ")).includes(n))) return false;
+  return true;
+}
+function catalogoHtml() {
+  if (catEstado === "falta" || catEstado === "sin-cache") return archivoHtml();
+  if (!CATALOGO) { cargarCatalogo(); return `<p class="small mut" style="margin-top:16px">Abriendo el catálogo…</p>`; }
+  const filtro = (tipo, ops) => `<div class="filtros" role="group">${ops.map(([id, n]) => `<button data-cat${tipo}="${id}" aria-pressed="${ui.cat[tipo] === id}">${n}</button>`).join("")}</div>`;
+  const pag = p => { const m = p.fuente.match(/pág\. ([\d–, ]+\d)/); return m ? "p." + m[1] : ""; };
+  const fila = p => `<button class="prog-f" data-prog="${esc(p.id)}"><span class="prog-n">${esc(p.nombre)}</span><span class="prog-m">${esc(semTxt(p))} · ${esc(p.dias)} días</span>
+    <span class="prog-d">${esc([p.meta, p.nivel].filter(Boolean).join(" · "))}</span><span class="prog-p">${esc(pag(p))}</span></button>`;
+  const s = W[st.actual - 1];
+  const tuPlan = `<button class="prog-f" data-tab="ano"><span class="prog-n">Exponential</span><span class="prog-m">${W.length} sem · ${s.dias.length} días</span>
+    <span class="prog-d">${esTuyo() ? "El que usas ahora · ábrelo en Año" : "El plan base de la app · ábrelo en Año"}</span><span class="prog-p"></span></button>`;
+  const vis = CATALOGO.programas.filter(pasaFiltro);
+  const grupos = CATALOGO.grupos.map(g => {
+    const l = vis.filter(p => p.grupo === g.id);
+    const n = g.id === "guardados" && esTuyo() ? "Tus programas guardados" : g.n;  // el archivo es el mismo para todos; en tu teléfono son los tuyos
+    return l.length ? `<h2>${esc(n)} <span class="small mut mono">${l.length}</span></h2><p class="small mut">${esc(g.d)}</p><div class="progs">${l.map(fila).join("")}</div>` : "";
+  }).join("");
+  const todos = ui.cat.obj === "todos" && ui.cat.dias === "todos";
+  return `<p class="small mut" style="margin-top:16px">${CATALOGO.programas.length + 1} programas. Toca uno para ver sus semanas, días y ejercicios.</p>
+    <span class="k cat-k">Objetivo</span>${filtro("obj", CAT_OBJ)}
+    <span class="k cat-k">Días por semana</span>${filtro("dias", CAT_DIAS)}
+    ${todos ? `<h2>Tu plan <span class="small mut mono">1</span></h2><p class="small mut">${esTuyo() ? "Tu año con los ciclos de la Pirámide." : "52 semanas con los ciclos de la Pirámide."}</p><div class="progs">${tuPlan}</div>` : ""}
+    ${grupos || `<p class="small mut" style="margin-top:16px">Ningún programa con esos filtros.</p>`}
+    <p class="small mut fuente-c">Catálogo ${CATALOGO.version ? "del " + esc(fechaTxt(CATALOGO.version)) + ", " : ""}guardado en este teléfono. ${botonArchivo("Abrir una versión nueva", "link-btn")}</p>`;
+}
+function ejCat(x) {
+  const meta = [x.c, x.i, x.d].filter(Boolean).map(esc).join(" · ");
+  return `<div class="ej-c"><div class="ej-h"><b>${esc(x.n)}</b><span class="mono">${esc(x.s)} × ${esc(x.r)}</span></div>
+    ${meta ? `<span class="ej-m">${meta}</span>` : ""}${x.t ? `<span class="small">${esc(x.t)}</span>` : ""}
+    ${x.x ? `<span class="small mut">${esc(x.x)}</span>` : ""}${x.sub && x.sub.length ? `<span class="small mut">Sustitutos: ${esc(x.sub.join(" · "))}</span>` : ""}</div>`;
+}
+function fichaHtml() {
+  const id = ui.cat.prog, P = FICHAS[id], idx = CATALOGO && CATALOGO.programas.find(p => p.id === id);
+  const g = CATALOGO && idx ? CATALOGO.grupos.find(x => x.id === idx.grupo) : null;
+  const volver = `<div class="ctx"><span>Programas${g ? " · " + esc(g.n) : ""}</span><button class="link-btn" data-prog-volver>Volver al catálogo</button></div>`;
+  if (!P) { cargarFicha(id); return `${volver}<p class="small mut" style="margin-top:16px">Abriendo el programa…</p>`; }
+  const n = P.plan.length, w = Math.min(ui.cat.sem, n - 1), sem = P.plan[w];
+  const series = sem.d.reduce((a, d) => a + d.e.reduce((b, x) => b + (+x.s || 0), 0), 0), conEj = sem.d.filter(d => d.e.length).length;
+  return `${volver}
+    <div class="titulo"><h1>${esc(P.nombre)}</h1><p class="sub">${[P.autor, semTxt(P), P.dias + " días", P.nivel].filter(Boolean).map(esc).join(" · ")}</p></div>
+    <div class="nota-plan"><span class="k">${esc(P.meta)}</span><p>${esc(P.resumen)}</p></div>
+    <div class="rule"><h3>Cómo progresar</h3><p>${esc(P.progresion)}</p></div>
+    ${P.aviso ? `<div class="rule"><h3>Nota de la transcripción</h3><p>${esc(P.aviso)}</p></div>` : ""}
+    <div class="titulo-row prog-sem"><div class="titulo"><h2>${esc(sem.n)}${n > 1 ? ` <span class="small mut mono">${w + 1} de ${n}</span>` : ""}</h2><p class="sub">${esc([sem.b, `${conEj} ${conEj === 1 ? "día" : "días"} de entrenamiento · ${series} series`].filter(Boolean).join(" · "))}</p></div>
+      ${n > 1 ? `<button class="circ" data-progsem="-1" aria-label="Semana anterior" ${w === 0 ? "disabled" : ""}>${ICON.back}</button>
+      <button class="circ" data-progsem="1" aria-label="Semana siguiente" ${w === n - 1 ? "disabled" : ""}>${ICON.next}</button>` : ""}</div>
+    ${sem.d.map(d => `<h3 class="dia-c">${esc(d.n)}</h3>${d.desc ? `<p class="small mut">${esc(d.desc)}</p>` : ""}
+      ${d.e.length ? `<div class="ejs">${d.e.map(ejCat).join("")}</div>` : d.desc ? "" : `<p class="small mut">Descanso.</p>`}`).join("")}
+    <p class="small mut fuente-c">Fuente: ${esc(P.fuente)}.</p>`;
+}
+function masProgramas() { return ui.cat.prog ? "" : catalogoHtml(); }
+/* La ficha deja una entrada en el historial: el botón «atrás» del teléfono vuelve al catálogo en vez de salir de la app. */
+function cerrarFicha() { const y = ui.cat.y; ui.cat.prog = null; renderMas(); if (ui.tab === "mas") window.scrollTo(0, y); }
 function renderMas() {
-  const [t, sub] = {bloques: ["Bloques del año", "Qué hace cada bloque y de qué página sale."], volumen: ["Volumen por músculo", "Series por músculo, semana a semana."],
+  if (ui.mas === "programas" && ui.cat.prog) { $("#v-mas").innerHTML = fichaHtml(); return; }
+  const [t, sub] = {programas: ["Programas", "Elige un programa del catálogo."], bloques: ["Bloques del año", "Qué hace cada bloque y de qué página sale."], volumen: ["Volumen por músculo", "Series por músculo, semana a semana."],
     reglas: ["Reglas y herramientas", "Checklist, calculadoras y las reglas del plan."], datos: ["Tus datos", "Dónde se guarda tu registro."], tema: ["Tema", "Los colores de toda la app."]}[ui.mas] || ["Más", ""];
   let body = `<div class="titulo"><h1>${t}</h1><p class="sub">${sub}</p></div>
-    <div class="seg" style="--n:5" role="group" aria-label="Secciones de Más">${[["bloques", "Bloques"], ["volumen", "Volumen"], ["reglas", "Reglas"], ["datos", "Datos"], ["tema", "Tema"]].map(([id, n]) => `<button data-mas="${id}" aria-pressed="${ui.mas === id}">${n}</button>`).join("")}</div>`
-    + ({bloques: masBloques, volumen: masVolumen, reglas: masReglas, datos: masDatos, tema: masTema}[ui.mas] || masBloques)();
+    <div class="seg seg-mas" style="--n:6" role="group" aria-label="Secciones de Más">${[["programas", "Programas"], ["bloques", "Bloques"], ["volumen", "Volumen"], ["reglas", "Reglas"], ["datos", "Datos"], ["tema", "Tema"]].map(([id, n]) => `<button data-mas="${id}" aria-pressed="${ui.mas === id}">${n}</button>`).join("")}</div>`
+    + ({programas: masProgramas, bloques: masBloques, volumen: masVolumen, reglas: masReglas, datos: masDatos, tema: masTema}[ui.mas] || masBloques)();
   if (ui.mas === "datos") body += `<h2>Versión ${VERSION.n} · ${esc(VERSION.nombre)}</h2>
     <div class="list">${VERSIONES.map(v => `<div class="row"><span class="k">V${v.n} · ${esc(v.nombre.toUpperCase())} · ${esc(v.fecha.toUpperCase())}</span><p class="small" style="margin:3px 0 0;color:var(--tx2)">${esc(v.txt)}</p></div>`).join("")}</div>`;
   $("#v-mas").innerHTML = body;
@@ -1554,8 +1757,9 @@ async function pantalla() {
    confirmas: la serie en curso de Hoy y el registro completo a medio llenar. Dura 12 horas. */
 const BKEY = "exp-borrador";
 function guardarBorrador() {
+  if (recargando) return;
   try {
-    const b = {t: Date.now(), w: ui.week, day: ui.day, edit: edit && edit.tocado ? edit : null};
+    const b = {t: Date.now(), quien: storeKey(), w: ui.week, day: ui.day, edit: edit && edit.tocado ? edit : null};
     if (sheet && sheet.tipo !== "hist") b.sheet = sheet.tipo === "reg"
       ? {tipo: "reg", w: sheet.w, key: sheet.key, rows: sheet.rows, sel: sheet.sel, hid: sheet.hid, otro: sheet.otro, com: sheet.com}
       : {tipo: "extra", w: sheet.w, did: sheet.did, nombre: sheet.nombre, rows: sheet.rows};
@@ -1565,7 +1769,7 @@ function guardarBorrador() {
 function restaurarBorrador() {
   let b = null;
   try { b = JSON.parse(localStorage.getItem(BKEY) || "null"); } catch (e) {}
-  if (!b || Date.now() - (b.t || 0) > 12 * 3600 * 1000) return false;
+  if (!b || Date.now() - (b.t || 0) > 12 * 3600 * 1000 || (b.quien || STORE) !== storeKey()) return false;  // solo el de esta persona
   const e = b.edit;
   if (e && e.w === ui.week && itemDeClave(e.w, e.key)) {
     const prev = (LOG[e.w] || {})[e.key], n = prev && prev.sets && !prev.omitido ? prev.sets.length : 0;
@@ -1597,8 +1801,74 @@ function autoDia() {
   if (dia !== ui.day || !edit || edit.w !== s.w) ui.abierto = undefined;
   ui.day = dia;
 }
+/* ── entrada: sin cuenta ni registro en el teléfono, la bienvenida; con correo por primera vez, el punto de partida ── */
+const PARTIDA = [["banca", "Press de banca"], ["sentadilla", "Sentadilla"], ["peso_muerto", "Peso muerto"], ["jalon", "Jalón al pecho"]];
+const hoyIso = () => { const h = new Date(); return `${h.getFullYear()}-${String(h.getMonth() + 1).padStart(2, "0")}-${String(h.getDate()).padStart(2, "0")}`; };
+function puerta() {
+  if (otraPersona()) return perfil ? null : perfilRevisado ? "partida" : "cargando";
+  return !conectado() && !datosLocales && !Object.keys(LOG).length ? "bienvenida" : null;  // con registros en el teléfono, sigue como siempre
+}
+function maxPartida(id) {
+  const x = ui.partida[id] || {}, k = num(x.kg), r = num(x.reps), rpe = num(x.rpe);
+  if (!(k > 0 && r > 0 && rpe >= 6)) return null;
+  return {max: r05(e1rm({kg: k, reps: r, rpe})), margen: r + (10 - rpe)};
+}
+function maxPartidaTxt(id) {
+  const m = maxPartida(id);
+  return !m ? "Pon kilos, reps y RPE." : `Máximo ≈ ${kg(m.max)}${m.margen > MAX_FIABLE ? " · poco preciso: estima mejor con una serie de 1–5 reps cerca del fallo (p.115, p.120)" : ""}`;
+}
+function bienvenidaHtml() {
+  const inv = ui.inv || {};
+  const tabs = [["Hoy", "Lo que toca hoy y dónde anotar cada serie."], ["Semana", "La semana entera, tu volumen y lo que falta."],
+    ["Año", "Los ciclos, tus máximos y tus medidas."], ["Más", "Las reglas del libro, tus datos y los colores."]];
+  return `<div class="titulo"><h1>Tu año de entrenamiento</h1><p class="sub">Un plan de 52 semanas hecho con la Pirámide, que se ajusta con lo que anotas.</p></div>
+    <div class="panel" style="margin-top:16px">
+      <p class="small" style="margin:0 0 12px">${inv.repo ? "Tu repositorio ya viene en el enlace. Pega la clave que te mandaron y toca Conectar." : "Quien te invitó te manda un enlace y una clave. Abre el enlace en este teléfono, o escribe aquí tu repositorio."}</p>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <label class="fl">Usuario<input class="inp" id="g-owner" value="${esc(inv.owner || TU_REPO.owner)}" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+        <label class="fl">Tu repositorio<input class="inp" id="g-repo" value="${esc(inv.repo || "")}" placeholder="exponential-nombre" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+        <label class="fl">Clave de acceso<input class="inp" id="g-token" type="password" autocomplete="off" placeholder="github_pat_…"></label>
+        <div class="btn-row"><button class="btn pri" data-connect>Conectar</button></div>
+        <p class="small mut" id="g-msg"></p>
+      </div>
+    </div>
+    <p class="small mut" style="margin-top:12px">Tu registro se guarda en este teléfono y en un repositorio privado. Lo ven tú, quien te invitó y Claude cuando lo revisa para dejarte comentarios. No necesitas cuenta de GitHub: la clave basta.</p>
+    <h2>Al entrar</h2>
+    <div class="lista-puerta">${tabs.map(([n, d]) => `<div><b>${n}</b><span>${d}</span></div>`).join("")}</div>`;
+}
+function cargandoHtml() {
+  const err = syncState === "error" && $("#sync") ? $("#sync").title : "";
+  return `<div class="titulo"><h1>Entrando…</h1><p class="sub mono">${esc(cfg.owner)}/${esc(cfg.repo)}</p></div>
+    <p class="small mut" style="margin-top:12px">${!navigator.onLine ? "Sin señal: la primera vez hace falta conexión para leer tu repositorio." : err ? esc(err) : "Leyendo tu repositorio."}</p>
+    <div class="acciones">${err || !navigator.onLine ? `<button class="btn" data-syncnow>Reintentar</button>` : ""}<button class="btn quiet" data-disconnect>Desconectar</button></div>`;
+}
+function partidaHtml() {
+  const P = ui.partida, rpes = [10, 9.5, 9, 8.5, 8, 7.5, 7];
+  return `<div class="titulo"><h1>Tu punto de partida</h1><p class="sub">Con esto se calculan las cargas de tus 52 semanas.</p></div>
+    <label class="fl" style="margin-top:16px">Tu nombre<input class="inp" data-pnombre value="${esc(P.nombre || "")}" autocomplete="given-name" placeholder="Cómo te llamas"></label>
+    <h2>Tus básicos</h2>
+    <p class="small mut">Una serie reciente de cada uno, de 1 a 5 reps y cerca del fallo: kilos, reps y RPE. Si sabes tu máximo, pon 1 rep a RPE 10. El máximo sale de la tabla de <span class="pg">p.64</span>.</p>
+    <div class="partida">${PARTIDA.map(([id, n]) => { const x = P[id] || {}; return `<div class="pt-f"><b>${n}</b>
+      <div class="pt-in">
+        <label class="fl">Kilos<input class="inp mono" data-pl="${id}" data-pf="kg" inputmode="decimal" value="${esc(x.kg ?? "")}" placeholder="kg"></label>
+        <label class="fl">Reps<input class="inp mono" data-pl="${id}" data-pf="reps" inputmode="numeric" value="${esc(x.reps ?? "")}" placeholder="reps"></label>
+        <label class="fl">RPE<select class="inp mono" data-pl="${id}" data-pf="rpe"><option value="">—</option>${rpes.map(r => `<option value="${r}" ${String(x.rpe) === String(r) ? "selected" : ""}>${f(r)}</option>`).join("")}</select></label>
+      </div><span class="small pt-out" id="pt-${id}">${esc(maxPartidaTxt(id))}</span></div>`; }).join("")}</div>
+    <div class="acciones"><button class="btn pri" data-armar>Armar mi plan</button></div>
+    <p class="small mut" style="margin-top:10px">Empiezas en la semana 1: una semana intro con ¾ de las series y un punto menos de RPE <span class="pg">p.104–105</span>. El plan está pensado para nivel intermedio <span class="pg">p.109, p.114</span>. Los máximos los cambias después en Año › Tus máximos.</p>
+    <div class="acciones"><button class="btn quiet" data-disconnect>Desconectar</button></div>`;
+}
+function renderPuerta(p) {
+  $("#h-eyebrow").textContent = "Exponential";
+  ["semana", "ano", "mas"].forEach(t => { $("#v-" + t).hidden = true; });
+  const v = $("#v-hoy"); v.hidden = false;
+  v.innerHTML = `<div class="puerta">${p === "bienvenida" ? bienvenidaHtml() : p === "cargando" ? cargandoHtml() : partidaHtml()}</div>`;
+}
 function render() {
   if (!DATA) return;
+  const p = puerta();
+  document.body.classList.toggle("en-puerta", !!p);
+  if (p) { renderPuerta(p); return; }
   ui.day = Math.min(ui.day, W[ui.week - 1].dias.length - 1);
   header();
   ["hoy", "semana", "ano", "mas"].forEach(t => { $("#v-" + t).hidden = t !== ui.tab; });
@@ -1643,6 +1913,32 @@ document.addEventListener("click", async e => {
   if (!t) return;
   const ds = t.dataset;
   if (ds.tab) { ui.tab = ds.tab; ui.dockCtl = false; render(); window.scrollTo(0, 0); return; }
+  if (ds.inv) {
+    const r = String(ui.inv.nuevo || "").trim();
+    if (!/^[A-Za-z0-9._-]+$/.test(r)) { toast("Escribe el nombre de su repositorio, por ejemplo exponential-ana."); return; }
+    if (r === TU_REPO.repo) { toast("Ese es tu repositorio: elige otro nombre."); return; }
+    if (ds.inv === "repo") window.open(enlaceRepoNuevo(r), "_blank", "noopener");
+    else if (ds.inv === "clave") window.open(enlaceClave(r, "el registro de " + r), "_blank", "noopener");
+    else {
+      ui.inv.enlace = enlaceInvitacion(r);
+      try { await navigator.clipboard.writeText(ui.inv.enlace); toast("Enlace copiado: pégalo en el correo."); }
+      catch (err) { toast("No pude copiarlo: mantén presionado el enlace de abajo."); }
+      renderMas();
+    }
+    return;
+  }
+  if ("armar" in ds) {
+    const nombre = String(ui.partida.nombre || "").trim(), M = {};
+    for (const [id, n] of PARTIDA) { const m = maxPartida(id); if (!m) { toast(`Falta ${n.toLowerCase()}: kilos, reps y RPE.`); return; } M[id] = m.max; }
+    if (!nombre) { toast("Pon tu nombre."); return; }
+    perfil = {nombre, creado: hoyIso(), partida: Object.fromEntries(PARTIDA.map(([id]) => [id, Object.assign({}, ui.partida[id], {max: M[id]})]))};
+    st.rm = [{banca: M.banca, sentadilla: M.sentadilla, peso_muerto: M.peso_muerto}, {}, {}, {}, {}];
+    st.jalon = M.jalon; st.actual = 1;
+    Object.assign(ui, {week: 1, day: 0, abierto: undefined, tab: "hoy", dayTouched: false});
+    dirty.perfil = marca(); dirty.estado = marca();
+    pedirGuardado(0); render(); window.scrollTo(0, 0);
+    toast(`Listo, ${nombre}: tu plan empieza en la semana 1.`); return;
+  }
   if (t.id === "sync") { ui.tab = "mas"; ui.mas = "datos"; render(); window.scrollTo(0, 0); return; }
   if (ds.step) return irSemana(ui.week + Number(ds.step));
   if ("today" in ds) return irSemana(st.actual);
@@ -1688,7 +1984,15 @@ document.addEventListener("click", async e => {
   if (ds.selrow !== undefined && sheet) { sheet.sel = Number(ds.selrow); renderSheet(); return; }
   if (ds.open) return abrirRegistro(ui.week, ds.open);
   if (ds.extraOpen) return abrirExtra(ds.extraOpen);
-  if (ds.mas) { ui.mas = ds.mas; saveStore(); render(); return; }
+  if (ds.mas) { ui.mas = ds.mas; ui.cat.prog = null; saveStore(); render(); return; }
+  if (ds.catobj || ds.catdias) { if (ds.catobj) ui.cat.obj = ds.catobj; else ui.cat.dias = ds.catdias; renderMas(); return; }
+  if (ds.prog) {
+    ui.cat = {...ui.cat, prog: ds.prog, sem: 0, y: window.scrollY};
+    try { if (!(history.state && history.state.ficha)) history.pushState({ficha: 1}, ""); } catch (err) {}
+    renderMas(); window.scrollTo(0, 0); return;
+  }
+  if ("progVolver" in ds) { if (history.state && history.state.ficha) history.back(); else cerrarFicha(); return; }
+  if (ds.progsem) { ui.cat.sem = Math.max(0, ui.cat.sem + Number(ds.progsem)); renderMas(); const h = $(".prog-sem"); if (h) h.scrollIntoView({block: "start"}); return; }
   if (ds.tema) { tema.modo = ds.tema; guardarTema(); renderMas(); return; }
   if (ds.av) { ui.av = ds.av; ui.avPt = null; renderAno(); return; }
   if (ds.tmas) {
@@ -1731,12 +2035,17 @@ document.addEventListener("click", async e => {
   if ("saveExtra" in ds) return guardarExtraSheet();
   if ("syncnow" in ds) { Object.keys(loaded).forEach(k => delete loaded[k]); await enCola(pull); return; }
   if ("export" in ds) return exportar();
-  if ("disconnect" in ds) { cfg.token = ""; saveCfg(); setSync("local", "Guardado solo en este teléfono"); render(); return; }
+  if ("disconnect" in ds) {
+    saveStore();  // lo de esta persona queda guardado aparte en el teléfono
+    const quien = storeKey(); cfg.token = ""; saveCfg();
+    if (storeKey() !== quien) return recargar();  // era otra persona: vuelve a la bienvenida sin mezclar datos
+    setSync("local", "Guardado solo en este teléfono"); render(); return;
+  }
   if ("connect" in ds) {
     const msg = $("#g-msg"), owner = $("#g-owner").value.trim(), repo = $("#g-repo").value.trim(), token = $("#g-token").value.trim();
     if (!owner || !repo || !token) { msg.textContent = "Completa los tres campos."; return; }
     msg.textContent = "Conectando…";
-    try { await conectar(owner, repo, token); toast("Conectado a tu cuenta."); render(); }
+    try { await conectar(owner, repo, token); if (!recargando) { toast("Conectado a tu cuenta."); render(); } }
     catch (err) { msg.textContent = err.message; }
     return;
   }
@@ -1751,6 +2060,12 @@ document.addEventListener("input", e => {
     $("#sh-sum").textContent = sumTxt(); guardarBorrador(); return;
   }
   if (t.dataset.rtkg) { ui.rt[t.dataset.rtkg] = Object.assign({}, ui.rt[t.dataset.rtkg], {kg: t.value}); return; }
+  if (t.dataset.pl) {
+    const id = t.dataset.pl; ui.partida[id] = Object.assign({}, ui.partida[id], {[t.dataset.pf]: t.value});
+    const o = $("#pt-" + id); if (o) o.textContent = maxPartidaTxt(id); return;
+  }
+  if ("pnombre" in t.dataset) { ui.partida.nombre = t.value; return; }
+  if ("invrepo" in t.dataset) { ui.inv.nuevo = t.value; ui.inv.enlace = ""; return; }
   if (sheet && "otro" in t.dataset) { sheet.otro = t.value; guardarBorrador(); return; }
   if (sheet && "com" in t.dataset) { sheet.com = t.value; guardarBorrador(); return; }
   if (sheet && "xn" in t.dataset) { sheet.nombre = t.value; guardarBorrador(); return; }
@@ -1776,6 +2091,7 @@ document.addEventListener("click", e => { const h = e.target.closest && e.target
 document.addEventListener("focusin", e => { if (e.target.classList && e.target.classList.contains("hit")) mostrarPunto(e.target); });
 document.addEventListener("change", e => {
   const t = e.target;
+  if (t.id === "cat-file") { const f = t.files && t.files[0]; t.value = ""; if (f) importarCatalogo(f); return; }
   // anotaste las reps de una serie de esta semana: empieza el descanso de ese ejercicio
   if (sheet && sheet.tipo === "reg" && t.dataset.f === "reps" && t.value.trim() && sheet.w === st.actual) {
     iniciarDescanso(segundosDescanso(descanso(sheet.it)), nombrePlan(sheet.it));
@@ -1824,14 +2140,15 @@ document.addEventListener("visibilitychange", () => {
   if (conectado() && !sheet) enCola(pull);
 });
 window.addEventListener("pagehide", alSalir);
-window.addEventListener("popstate", () => { if (sheet) cerrarSheet(true); });
+window.addEventListener("popstate", () => { if (sheet) cerrarSheet(true); else if (ui.cat.prog) cerrarFicha(); });
 
 /* ── inicio ── */
 (async function inicio() {
   aplicarTema();
+  leerInvitacion();  // enlace de invitación: trae tu usuario y su repositorio, nunca la clave
   readStore();
   try {
-    const r = await fetch("data/plan.json", {cache: "no-cache"});
+    const r = await fetch(esTuyo() ? "data/plan.json" : "data/plan-base.json", {cache: "no-cache"});
     DATA = await r.json();
   } catch (e) {
     $("#v-hoy").innerHTML = `<div class="titulo"><h1>No pude cargar el plan</h1><p class="sub">Abre la app con señal una vez para guardarla en el teléfono.</p></div>`;

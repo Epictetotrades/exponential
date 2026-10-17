@@ -1,8 +1,8 @@
 /* Guarda la app en el teléfono para que abra sin señal.
    Con señal, siempre pide la versión más nueva y la guarda; sin señal, usa la guardada.
    Las llamadas a GitHub (tus registros) nunca pasan por la caché. */
-const CACHE = "exponential-2.2";  // igual a la versión de app.js
-const SHELL = ["./", "index.html", "styles.css", "app.js", "data/plan.json", "manifest.webmanifest",
+const CACHE = "exponential-2.3";  // igual a la versión de app.js
+const SHELL = ["./", "index.html", "styles.css", "app.js", "data/plan.json", "data/plan-base.json", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png"];
 
 self.addEventListener("install", e => {
@@ -10,7 +10,7 @@ self.addEventListener("install", e => {
 });
 self.addEventListener("activate", e => {
   e.waitUntil(caches.keys()
-    .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+    .then(keys => Promise.all(keys.filter(k => k !== CACHE && k !== "exp-catalogo").map(k => caches.delete(k))))  // el catálogo abierto desde archivo se queda
     .then(() => self.clients.claim()));
 });
 self.addEventListener("fetch", e => {
