@@ -7,6 +7,7 @@
 /* ── versión: súbela en cada publicación (y la etiqueta vX.Y en git). Después de x.9 sigue (x+1).0:
    «1.10» se lee 1,1 y parece anterior a la 1.9. ── */
 const VERSIONES = [
+  {n: "2.4", nombre: "Catálogo desde el repositorio", fecha: "17 oct 2026", txt: "Si el catálogo está en tu repositorio privado, Más › Programas lo trae solo la primera vez y lo deja en el teléfono; si no, se abre desde su archivo."},
   {n: "2.3", nombre: "Varias personas", fecha: "16 oct 2026", txt: "Otra persona puede entrar con su propio repositorio y una clave: pone su punto de partida (una serie de cada básico) y tiene su plan de 52 semanas, su registro y su configuración. Para invitar a alguien: Más › Datos. Nuevo en Más › Programas: el catálogo de programas (Pirámide, Jeff Nippard, The Muscle Ladder y otros), que se abre una vez desde su archivo y queda en el teléfono."},
   {n: "2.2", nombre: "Ocho mejoras", fecha: "15 oct 2026", txt: "Pantalla encendida al entrenar, calentamiento de p.224, discos por lado, re-test de la S14 en Semana, registro por lado (búlgara y copenhagen), medidas en Año, historial por ejercicio y volumen hecho contra el plan con la tabla de p.214. Las RPE de varias series se separan con «/» (8 / 8,5), para no confundirlas con decimales."},
   {n: "2.1", nombre: "RPE 5 y atrás", fecha: "15 oct 2026", txt: "El RPE va de 5 a 10 (el plan pide 5–7 en intros y descargas), en botones más grandes; el botón «atrás» del teléfono cierra el registro en vez de salir de la app."},
@@ -1332,10 +1333,23 @@ async function leerCat(p) {
   const r = await (await caches.open(CAT_CACHE)).match(catUrl(p));
   return r ? r.json() : null;
 }
+/* Si el catálogo está en el repositorio de la persona (catalogo.json), se carga solo la primera vez, sin buscar el archivo.
+   Se pide en crudo: la API en base64 solo entrega archivos de hasta 1 MB. */
+async function catalogoDelRepo() {
+  const r = await fetch(contentsUrl("catalogo.json"), {cache: "no-store", headers: {
+    Accept: "application/vnd.github.raw+json", Authorization: "Bearer " + cfg.token, "X-GitHub-Api-Version": "2022-11-28"}});
+  if (r.status === 404) return null;
+  if (!r.ok) throw await httpErr(r);
+  return r.json();
+}
 async function cargarCatalogo() {
   if (CATALOGO || catEstado) return;
   catEstado = "cargando";
-  try { CATALOGO = await leerCat("indice.json"); catEstado = CATALOGO ? "" : "falta"; } catch (e) { catEstado = "sin-cache"; }
+  try { CATALOGO = await leerCat("indice.json"); } catch (e) { catEstado = "sin-cache"; }
+  if (!CATALOGO && catEstado === "cargando" && conectado() && navigator.onLine) {
+    try { const C = await catalogoDelRepo(); if (C && await guardarCatalogo(C) === true) toast(`Catálogo traído de tu repositorio: ${C.programas.length} programas.`); } catch (e) {}
+  }
+  if (catEstado === "cargando") catEstado = CATALOGO ? "" : "falta";
   if (ui.tab === "mas" && ui.mas === "programas") renderMas();
 }
 async function cargarFicha(id) {
@@ -1345,16 +1359,15 @@ async function cargarFicha(id) {
   else { CATALOGO = null; catEstado = "falta"; ui.cat.prog = null; }  // el teléfono borró el catálogo: se vuelve a abrir el archivo
   if (ui.tab === "mas" && ui.mas === "programas") renderMas();
 }
-/* Abrir el archivo: se revisa que sea el catálogo, se guarda cada programa y el índice al final
-   (si algo falla a mitad de camino, no queda un índice que apunte a programas que no están). */
-async function importarCatalogo(file) {
-  let C = null;
-  try { C = JSON.parse(await file.text()); } catch (e) {}
+/* Guardar el catálogo: se revisa que sea el catálogo, se guarda cada programa y el índice al final
+   (si algo falla a mitad de camino, no queda un índice que apunte a programas que no están).
+   Devuelve true, o el motivo por el que no se pudo. */
+async function guardarCatalogo(C) {
   const valido = C && C.formato === CAT_FORMATO && Array.isArray(C.grupos) && Array.isArray(C.programas) && C.programas.length
     && C.programas.every(p => p && typeof p.id === "string" && /^[a-z0-9-]+$/.test(p.id) && typeof p.nombre === "string" && typeof p.fuente === "string"
       && Array.isArray(p.plan) && p.plan.length && p.plan.every(s => s && Array.isArray(s.d) && s.d.every(d => d && Array.isArray(d.e))));
-  if (!valido) { toast("Ese archivo no es el catálogo de Exponential."); return; }
-  if (typeof caches === "undefined") { toast("Este navegador no deja guardar el catálogo. Abre la app en Chrome."); return; }
+  if (!valido) return "Ese archivo no es el catálogo de Exponential.";
+  if (typeof caches === "undefined") return "Este navegador no deja guardar el catálogo. Abre la app en Chrome.";
   const indice = {version: String(C.version || ""), grupos: C.grupos, programas: C.programas.map(({plan, progresion, aviso, ...meta}) => meta)};
   const json = x => new Response(JSON.stringify(x), {headers: {"Content-Type": "application/json"}});
   try {
@@ -1362,10 +1375,17 @@ async function importarCatalogo(file) {
     await Promise.all((await c.keys()).map(k => c.delete(k)));  // la versión nueva reemplaza entera a la anterior
     await Promise.all(C.programas.map(p => c.put(catUrl(encodeURIComponent(p.id) + ".json"), json(p))));
     await c.put(catUrl("indice.json"), json(indice));
-  } catch (e) { toast("No pude guardar el catálogo en el teléfono."); return; }
+  } catch (e) { return "No pude guardar el catálogo en el teléfono."; }
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}  // que Android no lo borre por falta de espacio
   CATALOGO = indice; catEstado = ""; ui.cat.prog = null;
   Object.keys(FICHAS).forEach(k => delete FICHAS[k]);
+  return true;
+}
+async function importarCatalogo(file) {
+  let C = null;
+  try { C = JSON.parse(await file.text()); } catch (e) {}
+  const r = await guardarCatalogo(C);
+  if (r !== true) { toast(r); return; }
   renderMas(); window.scrollTo(0, 0);
   toast(`Catálogo guardado en el teléfono: ${C.programas.length} programas.`);
 }
