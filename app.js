@@ -7,6 +7,7 @@
 /* ── versión: súbela en cada publicación (y la etiqueta vX.Y en git). Después de x.9 sigue (x+1).0:
    «1.10» se lee 1,1 y parece anterior a la 1.9. ── */
 const VERSIONES = [
+  {n: "2.6", nombre: "Catálogo en zip", fecha: "17 oct 2026", txt: "El catálogo se manda por WhatsApp como exponential-catalogo.zip y la app lo abre tal cual, sin descomprimirlo."},
   {n: "2.5", nombre: "Catálogo por archivo", fecha: "17 oct 2026", txt: "El catálogo se abre solo desde su archivo, por ejemplo el que te mandan por WhatsApp; la app ya no lo busca en el repositorio."},
   {n: "2.4", nombre: "Catálogo desde el repositorio", fecha: "17 oct 2026", txt: "Si el catálogo está en tu repositorio privado, Más › Programas lo trae solo la primera vez y lo deja en el teléfono; si no, se abre desde su archivo."},
   {n: "2.3", nombre: "Varias personas", fecha: "16 oct 2026", txt: "Otra persona puede entrar con su propio repositorio y una clave: pone su punto de partida (una serie de cada básico) y tiene su plan de 52 semanas, su registro y su configuración. Para invitar a alguien: Más › Datos. Nuevo en Más › Programas: el catálogo de programas (Pirámide, Jeff Nippard, The Muscle Ladder y otros), que se abre una vez desde su archivo y queda en el teléfono."},
@@ -1369,9 +1370,35 @@ async function guardarCatalogo(C) {
   Object.keys(FICHAS).forEach(k => delete FICHAS[k]);
   return true;
 }
+/* El catálogo viaja por WhatsApp en un .zip. Se lee aquí mismo, sin librerías: se busca el .json en el
+   directorio del zip y se descomprime con DecompressionStream (Chrome 103 o más nuevo). */
+async function leerZip(buf) {
+  const v = new DataView(buf), u8 = new Uint8Array(buf);
+  let fin = -1;  // fin del directorio central (firma 0x06054b50), buscado desde el final
+  for (let i = buf.byteLength - 22; i >= Math.max(0, buf.byteLength - 65557); i--) if (v.getUint32(i, true) === 0x06054b50) { fin = i; break; }
+  if (fin < 0) return null;
+  let p = v.getUint32(fin + 16, true);
+  for (let k = 0, n = v.getUint16(fin + 10, true); k < n; k++) {
+    if (v.getUint32(p, true) !== 0x02014b50) return null;
+    const metodo = v.getUint16(p + 10, true), tam = v.getUint32(p + 20, true), lnom = v.getUint16(p + 28, true), off = v.getUint32(p + 42, true);
+    const nombre = new TextDecoder().decode(u8.subarray(p + 46, p + 46 + lnom));
+    if (/\.json$/i.test(nombre) && !/(^|\/)__MACOSX\//.test(nombre)) {
+      const ini = off + 30 + v.getUint16(off + 26, true) + v.getUint16(off + 28, true), datos = u8.subarray(ini, ini + tam);
+      if (metodo === 0) return new TextDecoder().decode(datos);
+      if (metodo === 8) return new Response(new Blob([datos]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).text();
+      return null;
+    }
+    p += 46 + lnom + v.getUint16(p + 30, true) + v.getUint16(p + 32, true);
+  }
+  return null;
+}
 async function importarCatalogo(file) {
   let C = null;
-  try { C = JSON.parse(await file.text()); } catch (e) {}
+  try {
+    const buf = await file.arrayBuffer(), u8 = new Uint8Array(buf), zip = u8[0] === 0x50 && u8[1] === 0x4b;  // «PK»: es un zip
+    if (zip && typeof DecompressionStream === "undefined") { toast("Actualiza Chrome para abrir el catálogo."); return; }
+    C = JSON.parse(zip ? await leerZip(buf) : new TextDecoder().decode(u8));
+  } catch (e) {}
   const r = await guardarCatalogo(C);
   if (r !== true) { toast(r); return; }
   renderMas(); window.scrollTo(0, 0);
@@ -1381,11 +1408,11 @@ const botonArchivo = (txt, cls) => `<label class="${cls}">${txt}<input type="fil
 function archivoHtml() {
   if (catEstado === "sin-cache") return `<p class="small mut" style="margin-top:16px">Este navegador no deja guardar el catálogo. Abre la app en Chrome.</p>`;
   return `<div class="panel" style="margin-top:16px">
-      <p style="margin:0"><b>El catálogo no viene dentro de la app.</b> Se abre una vez desde el archivo <span class="mono">exponential-catalogo.json</span> y queda guardado en este teléfono.</p>
+      <p style="margin:0"><b>El catálogo no viene dentro de la app.</b> Se abre una vez desde el archivo <span class="mono">exponential-catalogo.zip</span> y queda guardado en este teléfono.</p>
       ${botonArchivo("Abrir el archivo del catálogo", "btn pri btn-archivo")}
       <ol class="small" style="padding-left:18px;color:var(--tx2);line-height:1.6;margin:12px 0 0">
         <li>En WhatsApp, toca el archivo para descargarlo.</li>
-        <li>Vuelve aquí y toca el botón: se abre el explorador de archivos. Búscalo en Recientes o en Documentos y tócalo.</li>
+        <li>Vuelve aquí y toca el botón: se abre el explorador de archivos. Búscalo en Recientes, Descargas o Documentos y tócalo. No hace falta descomprimirlo.</li>
       </ol>
     </div>`;
 }
