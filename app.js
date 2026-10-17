@@ -7,6 +7,7 @@
 /* ── versión: súbela en cada publicación (y la etiqueta vX.Y en git). Después de x.9 sigue (x+1).0:
    «1.10» se lee 1,1 y parece anterior a la 1.9. ── */
 const VERSIONES = [
+  {n: "2.7", nombre: "Avance de todo y metas tuyas", fecha: "17 oct 2026", txt: "Avance muestra cualquier ejercicio que hayas anotado (los básicos con su máximo estimado; los demás, tu mejor serie de cada semana). Las metas de banca y de medidas se cambian en Año, y Medidas quedó en una sola lista."},
   {n: "2.6", nombre: "Catálogo en zip", fecha: "17 oct 2026", txt: "El catálogo se manda por WhatsApp como exponential-catalogo.zip y la app lo abre tal cual, sin descomprimirlo."},
   {n: "2.5", nombre: "Catálogo por archivo", fecha: "17 oct 2026", txt: "El catálogo se abre solo desde su archivo, por ejemplo el que te mandan por WhatsApp; la app ya no lo busca en el repositorio."},
   {n: "2.4", nombre: "Catálogo desde el repositorio", fecha: "17 oct 2026", txt: "Si el catálogo está en tu repositorio privado, Más › Programas lo trae solo la primera vez y lo deja en el teléfono; si no, se abre desde su archivo."},
@@ -105,7 +106,8 @@ const STORE = "exp-app-v1", CFG = "exp-cfg-v1";
    repositorio (en tu cuenta) y una clave solo para él: tiene su registro, su perfil y el plan base
    (data/plan-base.json, sin lo tuyo). ── */
 const TU_REPO = {owner: "Epictetotrades", repo: "exponential-datos"};
-const PERFIL_TUYO = {metaBanca: {kg: 100, reps: 20}, medidas: true};
+/* Metas: se cambian en Año y se guardan con el estado (estado.json). Las tuyas parten en banca 100 kg × 20 y +2 cm de brazo y hombros, manteniendo el pecho. */
+const METAS_TUYAS = {banca: {kg: 100, reps: 20}, medidas: {brazo: 2, hombros: 2, pecho: 0}};
 let perfil = null, perfilRevisado = false;  // el de otra persona: {nombre, partida, creado}
 let datosLocales = false, recargando = false;
 let st = {actual: 13, rm: [{}, {}, {}, {}, {}], jalon: "", peso: "", medidas: []};
@@ -281,7 +283,7 @@ async function flush() {
     if (dirty.estado) {
       const v = dirty.estado;
       const r = await getFile("estado.json");
-      await putFile("estado.json", {rm: st.rm, jalon: st.jalon, actual: st.actual, peso: st.peso || "", medidas: st.medidas || []}, r.sha);
+      await putFile("estado.json", Object.assign({rm: st.rm, jalon: st.jalon, actual: st.actual, peso: st.peso || "", medidas: st.medidas || []}, st.metas ? {metas: st.metas} : {}), r.sha);
       if (dirty.estado === v) dirty.estado = false;
     }
     if (dirty.prog) {
@@ -345,6 +347,7 @@ async function pull() {
       if (v.actual) st.actual = v.actual;
       if (v.peso != null) st.peso = v.peso;
       if (Array.isArray(v.medidas)) st.medidas = v.medidas;
+      if (v.metas && typeof v.metas === "object") st.metas = v.metas;
     }
     const p = await getFile("prog.json");
     if (p.data) {
@@ -554,7 +557,7 @@ function ciclo(s) { return CICLOS.find(c => s.w >= c.w[0] && s.w <= c.w[1]); }
 const cicloD = c => c.id === "C1" && !esTuyo() ? "S1–S10 Pirámide · S11–S18 dos olas de intensidad" : c.d;
 /* AMRAP de banca en los tests: tu meta son 100 kg. A otra persona, el 70 % de su máximo: el último tramo
    de la tabla de p.64 (11–12 reps), para que el resultado caiga dentro de la tabla. */
-const cargaAmrap = s => esTuyo() ? PERFIL_TUYO.metaBanca.kg : r25(rmDe(s.w, "banca") * 0.7);
+const cargaAmrap = s => { const mb = metaBanca_(); return mb ? mb.kg : r25(rmDe(s.w, "banca") * 0.7); };
 function planTxt(s, it) {
   if (it.k === "main") return `${it.sets} × ${it.reps} · ${kg(r25(rmDe(s.w, it.lift) * it.pct / 100))} · RPE ${it.rpe}`;
   if (it.k === "single") { const rm = rmDe(s.w, it.lift); return `${kg(r25(rm * .8))} → ${kg(r25(rm * .9))} → single a RPE ${it.rpe}`; }
@@ -749,7 +752,7 @@ function itemRow(s, d, it) {
   const abierto = ui.abierto === key && edit && edit.key === key && edit.w === s.w;
   if (!abierto) return `<div class="paso ${cls}"><div class="riel"><i class="nodo"></i><s></s></div><div class="cuerpo">
     <button class="ex" data-abrir="${esc(key)}" aria-expanded="false">
-      <span class="ex-h"><b class="nombre">${esc(it.n)}</b><span class="chip ${cls}">${txt}</span></span>
+      <span class="ex-h"><b class="nombre">${esc(conMeta(it.n))}</b><span class="chip ${cls}">${txt}</span></span>
       <span class="kv"><span class="k">PLAN</span><span class="v">${esc(planTxt(s, it))}</span>${hecho ? `<span class="k">HECHO</span><span class="v fuerte">${esc(hecho)}</span>` : ""}</span>
       ${prev && prev.com ? `<span class="cita">“${esc(prev.com)}”</span>` : ""}
     </button>${extra}</div></div>`;
@@ -770,7 +773,7 @@ function itemRow(s, d, it) {
   return `<div class="paso abierto ${cls}"><div class="riel"><i class="nodo"></i><s></s></div><div class="cuerpo">
     <div class="tarjeta">
       <button class="ex" data-abrir="${esc(key)}" aria-expanded="true">
-        <span class="ex-h"><b class="nombre">${esc(it.n)}</b><span class="tag">${esc(tags)}</span></span>
+        <span class="ex-h"><b class="nombre">${esc(conMeta(it.n))}</b><span class="tag">${esc(tags)}</span></span>
         <span class="v">${esc(planTxt(s, it))}</span>
       </button>
       ${calor}
@@ -896,7 +899,7 @@ function renderSemana() {
       <button class="circ" data-step="-1" aria-label="Semana anterior" ${s.w === 1 ? "disabled" : ""}>${ICON.back}</button>
       <button class="circ" data-step="1" aria-label="Semana siguiente" ${s.w === 52 ? "disabled" : ""}>${ICON.next}</button></div>
     ${s.w !== st.actual ? `<div class="ctx"><span>Vas en la S${st.actual}</span><button class="link-btn" data-today>Ir a la S${st.actual}</button></div>` : ""}
-    <div class="nota-plan"><span class="k">Plan · esta semana</span><p>${esc(s.nota)}</p>${s.nota_libro ? `<p class="small mut">${esc(s.nota_libro)}</p>` : ""}</div>
+    <div class="nota-plan"><span class="k">Plan · esta semana</span><p>${esc(conMeta(s.nota))}</p>${s.nota_libro ? `<p class="small mut">${esc(s.nota_libro)}</p>` : ""}</div>
     ${nc && nc.txt ? `<div class="claude"><span class="k">CLAUDE · ESTA SEMANA</span><p>${esc(nc.txt)}</p></div>` : ""}
     ${plantilla ? `<p class="small mut" style="margin-top:12px">Esta semana se rediseñó con la Pirámide cuando ya había pasado, así que queda como plantilla: sirve de modelo para repetir el bloque, no tiene registros pendientes.</p>` : ""}
     ${!plantilla && s.w <= st.actual ? `<div class="stats"><div><span class="k">EJERCICIOS</span><span class="n">${hechos} <small>/ ${tot}</small></span></div><div><span class="k">SERIES</span><span class="n">${series} <small>/ ${plan}</small></span></div><div><span class="k">DÍAS</span><span class="n">${diasCon} <small>/ ${s.dias.length}</small></span></div></div>` : ""}
@@ -924,35 +927,51 @@ function resumenBloques(ws) {
   });
   return out.map(o => `${esc(NOMBRE[o.n] || o.n)} <span class="mono">${o.a === o.b ? o.a : o.a + "–" + o.b}</span>`).join(" · ");
 }
-function metaBanca() {
-  const b = rmDe(st.actual, "banca"), faltan = Math.max(0, 52 - st.actual);
-  const tuRitmo = b + 0.3 * faltan, libro = b + 0.5 * faltan;
-  const reps = x => repsTxt(repsDePct(100 / x * 100));
-  const hechos = [1, 2, 3, 4].map(i => st.rm[i] && Number(st.rm[i].amrap) ? `S${[18, 31, 44, 52][i - 1]}: ${st.rm[i].amrap} reps` : null).filter(Boolean);
-  return `<div class="kpis">
-    <div class="kpi"><span class="k">HOY</span><div class="n">${kg(b)}</div><div class="d">con 100 kg ≈ ${reps(b)} reps (p.64)</div></div>
-    <div class="kpi"><span class="k">S52 A TU RITMO</span><div class="n">≈ ${kg(r25(tuRitmo))}</div><div class="d">+3 kg cada 10 semanas → ≈ ${reps(tuRitmo)} reps con 100 kg</div></div>
-    <div class="kpi"><span class="k">S52 RITMO DEL LIBRO</span><div class="n">≈ ${kg(r25(libro))}</div><div class="d">+2,5 kg cada ~5 semanas, intermedio (p.111) → ≈ ${reps(libro)} reps</div></div>
-  </div>
-  <p class="small mut" style="margin-top:10px">Veinte repeticiones con 100 kg quedan fuera de la tabla del libro, que llega a 11–12 reps al 70 % <span class="pg">p.64</span>. Es meta de varios años: se mide en cada test con un AMRAP a 100 kg.${hechos.length ? " Registrado: " + hechos.join(" · ") + "." : ""}</p>`;
+const metas = () => st.metas || (esTuyo() ? METAS_TUYAS : {banca: null, medidas: {}});
+const metaBanca_ = () => { const b = metas().banca; return b && num(b.kg) > 0 && num(b.reps) > 0 ? {kg: num(b.kg), reps: num(b.reps)} : null; };
+/* Los textos del plan que dicen «AMRAP con 100 kg» muestran la meta que tengas puesta. */
+const conMeta = t => { const mb = metaBanca_(); return typeof t === "string" && esTuyo() && mb && mb.kg !== 100 ? t.replace(/AMRAP con 100 kg/g, `AMRAP con ${f(mb.kg)} kg`) : t; };
+function cambiarMeta(campo, valor) {
+  const m = JSON.parse(JSON.stringify(metas())); m.medidas = m.medidas || {};
+  if (campo === "kg" || campo === "reps") { m.banca = Object.assign({kg: "", reps: ""}, m.banca || {}, {[campo]: num(valor) ?? ""}); }
+  else if (String(valor).trim() === "") delete m.medidas[campo]; else m.medidas[campo] = num(valor) ?? 0;
+  st.metas = m; dirty.estado = marca(); saveStore(); pedirGuardado(900);
 }
-/* Medidas: tu meta es +2 cm en brazos y hombros, manteniendo el pecho. Se guardan en tu cuenta con el estado. */
+function metaBanca() {
+  const mb = metaBanca_();
+  const editor = `<div class="meta-ed"><label class="fl">Kilos<input class="inp mono" data-meta="kg" inputmode="decimal" value="${mb ? f(mb.kg) : ""}" placeholder="kg"></label>
+    <label class="fl">Reps<input class="inp mono" data-meta="reps" inputmode="numeric" value="${mb ? mb.reps : ""}" placeholder="reps"></label></div>`;
+  if (!mb) return `${editor}<p class="small mut" style="margin-top:8px">Pon kilos y reps: verás cuántas reps harías hoy con ese peso.</p>`;
+  const b = rmDe(st.actual, "banca"), faltan = Math.max(0, 52 - st.actual);
+  const reps = x => repsTxt(repsDePct(mb.kg / x * 100));
+  const libro = b + 0.5 * faltan, tuRitmo = b + 0.3 * faltan;
+  const hechos = [1, 2, 3, 4].map(i => st.rm[i] && Number(st.rm[i].amrap) ? `S${[18, 31, 44, 52][i - 1]}: ${st.rm[i].amrap} reps` : null).filter(Boolean);
+  return `${editor}
+  <div class="kpis" style="margin-top:12px">
+    <div class="kpi"><span class="k">HOY</span><div class="n">≈ ${reps(b)} reps</div><div class="d">con ${f(mb.kg)} kg y tu máximo de ${kg(b)} (p.64)</div></div>
+    ${esTuyo() ? `<div class="kpi"><span class="k">S52 A TU RITMO</span><div class="n">≈ ${reps(tuRitmo)} reps</div><div class="d">+3 kg de máximo cada 10 semanas</div></div>` : ""}
+    <div class="kpi"><span class="k">S52 RITMO DEL LIBRO</span><div class="n">≈ ${reps(libro)} reps</div><div class="d">+2,5 kg cada ~5 semanas (p.111)</div></div>
+  </div>
+  <p class="small mut" style="margin-top:10px">${mb.reps > 12 ? `${mb.reps} reps quedan fuera de la tabla del libro, que llega a 11–12 reps al 70 % <span class="pg">p.64</span>. ` : ""}Se mide en cada test con un AMRAP a ${f(mb.kg)} kg.${hechos.length ? " Registrado: " + hechos.join(" · ") + "." : ""}</p>`;
+}
+/* Medidas: una sola lista. Cada medida con su último valor, el cambio, su meta y la casilla para hoy. Se guardan con el estado. */
 const MEDIDAS = [["brazo", "Brazo"], ["hombros", "Hombros"], ["pecho", "Pecho"], ["cintura", "Cintura"], ["muslo", "Muslo"]];
 const fechaTxt = iso => { try { return new Date(iso + "T12:00:00").toLocaleDateString("es", {day: "numeric", month: "short", year: "numeric"}); } catch (e) { return iso; } };
 function medidasHtml() {
-  const M = st.medidas || [], ult = M[M.length - 1], pri = M[0], metas = esTuyo() && PERFIL_TUYO.medidas;  // las metas son las tuyas
-  const fila = (id, n, conMeta) => {
-    const v = ult ? num(ult[id]) : null, v0 = pri ? num(pri[id]) : null, d = v != null && v0 != null && M.length > 1 ? v - v0 : null;
-    const meta = metas && conMeta;
-    return `<div class="kpi"><span class="k">${n}${metas ? " · " + (meta ? "meta +2 cm" : "mantener") : ""}</span><div class="n">${v != null ? f(v) + " cm" : "—"}</div>${d != null
-      ? `<div class="d">${d >= 0 ? "+" : ""}${f(d)} cm desde el ${esc(fechaTxt(pri.f))}${meta ? ` · ${Math.max(0, Math.min(100, Math.round(d / 2 * 100)))} % de la meta` : ""}</div>`
-      : `<div class="d">${M.length ? "Con una segunda medición verás el cambio." : "Aún sin medir."}</div>`}</div>`;
-  };
-  return `<div class="kpis">${fila("brazo", "Brazo", true)}${fila("hombros", "Hombros", true)}${fila("pecho", "Pecho", false)}</div>
-    <div class="med">${MEDIDAS.map(([id, n]) => `<label class="fl">${n} (cm)<input class="inp mono" data-med="${id}" inputmode="decimal" placeholder="cm"></label>`).join("")}</div>
+  const M = st.medidas || [], mm = metas().medidas || {};
+  const filas = MEDIDAS.map(([id, n]) => {
+    const con = M.filter(m => num(m[id]) != null), v = con.length ? num(con[con.length - 1][id]) : null;
+    const d = con.length > 1 ? v - num(con[0][id]) : null, meta = mm[id], tiene = meta != null && meta !== "";
+    const metaTxt = !tiene ? "" : num(meta) > 0 ? `meta +${f(num(meta))} cm${d != null ? ` · ${Math.max(0, Math.min(100, Math.round(d / num(meta) * 100)))} %` : ""}` : "meta: mantener";
+    const linea = [v != null ? `${f(v)} cm` : "sin medir", d != null ? `${d >= 0 ? "+" : ""}${f(d)} desde el ${fechaTxt(con[0].f)}` : ""].filter(Boolean).join(" · ");
+    return `<div class="med-f"><div class="med-n"><b>${n}</b><span>${esc(linea)}</span>${metaTxt ? `<span class="med-meta">${esc(metaTxt)}</span>` : ""}</div>
+      <label class="fl">Hoy<input class="inp mono" data-med="${id}" inputmode="decimal" placeholder="cm"></label>
+      <label class="fl">Meta<input class="inp mono" data-metamed="${id}" inputmode="decimal" value="${tiene ? f(num(meta)) : ""}" placeholder="+cm"></label></div>`;
+  }).join("");
+  return `<div class="med-l">${filas}</div>
     <div class="acciones"><button class="btn pri" data-medida>Guardar medición de hoy</button></div>
-    <p class="small mut" style="margin-top:10px">Mide siempre en las mismas condiciones y en el mismo punto. El peso se anota en Más › Reglas.</p>
-    ${M.length ? `<div class="tw"><table><thead><tr><th>Fecha</th>${MEDIDAS.map(([, n]) => `<th class="n">${n}</th>`).join("")}</tr></thead><tbody>${M.slice().reverse().map(m => `<tr><td class="mono">${esc(fechaTxt(m.f))}</td>${MEDIDAS.map(([id]) => `<td class="n">${num(m[id]) != null ? f(num(m[id])) : "—"}</td>`).join("")}</tr>`).join("")}</tbody></table></div>` : ""}`;
+    <p class="small mut" style="margin-top:8px">En «Meta» van los cm que quieres ganar; 0 es mantener. El peso se anota en Más › Reglas.</p>
+    ${M.length ? `<details class="more" style="margin-top:8px"><summary>Mediciones anteriores (${M.length})</summary><div class="tw"><table><thead><tr><th>Fecha</th>${MEDIDAS.map(([, n]) => `<th class="n">${n}</th>`).join("")}</tr></thead><tbody>${M.slice().reverse().map(m => `<tr><td class="mono">${esc(fechaTxt(m.f))}</td>${MEDIDAS.map(([id]) => `<td class="n">${num(m[id]) != null ? f(num(m[id])) : "—"}</td>`).join("")}</tr>`).join("")}</tbody></table></div></details>` : ""}`;
 }
 function tablaMaximos() {
   const rows = TRAMOS.map((t, i) => `<tr><td><b class="mono">${t.d}</b><br><span class="small mut">${t.s}</span></td>${LIFTS.map(([id]) => {
@@ -988,7 +1007,7 @@ function renderAno() {
       <span><i class="sw" style="background:var(--f-int)"></i>Intensidad</span><span><i class="sw" style="background:var(--f-taper)"></i>Taper</span>
       <span><i class="sw" style="background:var(--f-test)"></i>Test</span>
     </div>
-    ${esTuyo() ? `<h2>Tu meta de banca</h2>${metaBanca()}` : ""}
+    <h2>${esTuyo() ? "Tu meta de banca" : "Meta de banca"}</h2>${metaBanca()}
     <h2>Medidas</h2>${medidasHtml()}
     <h2>Tus máximos</h2>
     <p class="small mut">Las cargas de cada tramo salen de estos números. Después de cada test, anota el resultado y las semanas siguientes se recalculan solas. Una casilla vacía usa la de arriba.</p>
@@ -999,7 +1018,7 @@ function renderAno() {
     <p class="small mut">S1–S10 siguen el ciclo de 8 semanas del libro con una semana intro y el taper aparte <span class="pg">p.104–105, p.132, p.136</span>. ${esTuyo() ? `S11–S18 es tu fuerza renovada y no se toca, porque vienes progresando <span class="pg">p.122</span>.` : `S11–S18 son dos olas de intensidad con re-test en la S14 y test en la S18 <span class="pg">p.248</span>.`}</p></div>`;
 }
 
-/* ── avance: máximo estimado por semana (tabla de p.64, solo series con RPE) ── */
+/* ── avance: cualquier ejercicio con series anotadas ── */
 const LIFT_N = {banca: "Banca", sentadilla: "Sentadilla", peso_muerto: "Peso muerto"};
 let historialPedido = false;
 function cargarHistorial() {
@@ -1012,70 +1031,91 @@ function cargarHistorial() {
     else if (ui.tab === "ano" && !sheet && !editando()) render();
   });
 }
-function serieAvance(lift) {
-  const pts = [], sinRpe = [], margen = [];
-  for (let w = 1; w <= st.actual; w++) {
-    const log = LOG[w]; if (!log) continue;
-    let mejor = null, hubo = false, conRpe = false;
-    W[w - 1].dias.forEach(d => d.items.forEach(it => {
-      if (!["main", "single", "amrap"].includes(it.k) || it.ex === "pausa" || (it.lift || it.ex) !== lift) return;
-      const p = log[claveDe(d.id, it)];
-      if (!registrado(p) || p.omitido || hechoDe(p, it).id !== it.ex) return;
-      hubo = true;
-      if (p.sets.some(x => x.rpe != null)) conRpe = true;
-      estimables(it, p.sets).forEach(x => {
-        const v = e1rm(x);
-        if (v && (!mejor || v > mejor.v)) mejor = {w, v, kg: x.kg, reps: x.reps, rpe: x.rpe};
-      });
-    }));
-    const rt = log["rt~" + lift];  // el single del re-test
-    if (rt) { hubo = true; conRpe = true; const v = e1rm({kg: rt.kg, reps: 1, rpe: rt.rpe}); if (v && (!mejor || v > mejor.v)) mejor = {w, v, kg: rt.kg, reps: 1, rpe: rt.rpe}; }
-    if (mejor) pts.push(mejor); else if (conRpe) margen.push(w); else if (hubo) sinRpe.push(w);
+/* Lo anotado en una semana, por el ejercicio que de verdad hiciste (la alternativa cuenta como ese ejercicio),
+   más los extras y el single del re-test. */
+function entradasLog(w) {
+  const log = LOG[w], out = []; if (!log) return out;
+  for (const [k, p] of Object.entries(log)) {
+    if (k.startsWith("x~")) { (Array.isArray(p) ? p : []).forEach(x => { if (x && x.n && x.sets && x.sets.length) out.push({id: "x:" + slug(x.n), n: x.n, sets: x.sets, it: null}); }); continue; }
+    if (k.startsWith("rt~")) { const l = k.slice(3); if (p && num(p.kg) > 0) out.push({id: l, n: LIFT_N[l] || l, sets: [{kg: num(p.kg), reps: 1, rpe: p.rpe}], it: null}); continue; }
+    if (k.includes("~") || !registrado(p) || p.omitido || !p.sets || !p.sets.length) continue;
+    const it = itemDeClave(w, k), h = it ? hechoDe(p, it) : (p.hecho || p.plan || {id: k.split(":")[1], n: k.split(":")[1]});
+    out.push({id: h.id, n: h.n, sets: p.sets, it});
   }
-  return {pts, sinRpe, margen};
+  return out;
 }
-function tipAvance(p) {
-  return `S${p.w}: ≈ ${kg(r05(p.v))} estimado, con tu mejor serie ${f(p.kg)} × ${p.reps} a RPE ${f(p.rpe)} (tabla p.64).`;
+/* Por semana: el máximo estimado con las series que lo permiten (RPE y no más de ~5 reps de margen, p.115/p.120)
+   y la mejor serie (más kilos; a igual peso, más reps). */
+function serieAvance(id) {
+  const pts = [], sinRpe = [], margen = [], mejores = [];
+  for (let w = 1; w <= st.actual; w++) {
+    const es = entradasLog(w).filter(x => x.id === id); if (!es.length) continue;
+    let mejor = null, top = null, conRpe = false;
+    es.forEach(x => {
+      if (x.sets.some(s => s.rpe != null)) conRpe = true;
+      estimables(x.it || {k: "acc"}, x.sets).forEach(s => { const v = e1rm(s); if (v && (!mejor || v > mejor.v)) mejor = {w, v, kg: s.kg, reps: s.reps, rpe: s.rpe}; });
+      x.sets.forEach(s => { const k = num(s.kg) || 0, r = num(s.reps) || 0; if (!top || k > top.kg || (k === top.kg && r > top.reps)) top = {w, v: k, kg: k, reps: r, rpe: s.rpe}; });
+    });
+    if (top) mejores.push(top);
+    if (mejor) pts.push(mejor); else if (conRpe) margen.push(w); else sinRpe.push(w);
+  }
+  return {pts, sinRpe, margen, mejores};
+}
+/* Todos los ejercicios con series anotadas: los básicos primero, después los que más series tienen. */
+function ejerciciosAvance() {
+  const m = {};
+  for (let w = 1; w <= st.actual; w++) entradasLog(w).forEach(x => {
+    const e = m[x.id] || (m[x.id] = {id: x.id, n: x.n, series: 0, semanas: new Set()});
+    e.series += x.sets.length; e.semanas.add(w); if (LIFT_N[x.id]) e.n = LIFT_N[x.id];
+  });
+  const orden = Object.keys(LIFT_N);
+  return Object.values(m).sort((a, b) => (orden.indexOf(a.id) + 1 || 99) - (orden.indexOf(b.id) + 1 || 99) || b.series - a.series || a.n.localeCompare(b.n));
+}
+function tipAvance(p, estimado = true) {
+  return estimado ? `S${p.w}: ≈ ${kg(r05(p.v))} estimado, con tu mejor serie ${f(p.kg)} × ${p.reps} a RPE ${f(p.rpe)} (tabla p.64).`
+    : `S${p.w}: tu mejor serie, ${f(p.kg)} kg × ${p.reps}${p.rpe != null ? " a RPE " + f(p.rpe) : ""}.`;
 }
 function avanceHtml() {
-  const lift = ui.av, {pts, sinRpe, margen} = serieAvance(lift), ref = rmDe(st.actual, lift);
-  const faltan = (sinRpe.length ? ` Sin RPE: ${sinRpe.map(w => "S" + w).join(", ")}.` : "") + (margen.length ? ` Con demasiado margen para estimar: ${margen.map(w => "S" + w).join(", ")}.` : "");
-  const seg = `<div class="seg" role="group" aria-label="Levantamiento" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:0">${Object.entries(LIFT_N).map(([id, n]) => `<button data-av="${id}" aria-pressed="${id === lift}">${n}</button>`).join("")}</div>`;
-  const ultimo = pts[pts.length - 1];
-  const meta = lift === "banca" && esTuyo() ? (() => {
-    const v = ultimo ? ultimo.v : ref;
-    return `<p class="small" style="margin:8px 0 0;color:var(--tx2)">Con 100 kg hoy ≈ <b class="mono">${repsTxt(repsDePct(100 / v * 100))} reps</b> (p.64). Tu meta: <b class="mono">20</b>.</p>`;
-  })() : "";
-  if (!pts.length) return `${seg}<p class="small mut" style="margin-top:12px">Todavía no hay series de ${LIFT_N[lift].toLowerCase()} que permitan estimar tu máximo: hace falta el RPE y no más de ~5 reps de margen hasta el fallo (p.115, p.120).${faltan}</p>${meta}`;
+  const lista = ejerciciosAvance();
+  if (!lista.length) return `<p class="small mut">Todavía no hay series anotadas.</p>`;
+  if (!lista.some(x => x.id === ui.av)) ui.av = lista[0].id;
+  const id = ui.av, ej = lista.find(x => x.id === id), {pts: est, sinRpe, margen, mejores} = serieAvance(id);
+  // Básicos: máximo estimado. Accesorios: también, si todas sus semanas lo permiten; si no, la mejor serie de cada semana, para que se vean todas.
+  const estimado = est.length > 0 && (!!LIFT_N[id] || est.length === mejores.length), pts = estimado ? est : mejores;
+  const ref = estimado && LIFT_N[id] ? rmDe(st.actual, id) : null;
+  const sel = `<select class="inp av-sel" data-av-sel aria-label="Ejercicio">${lista.map(x => `<option value="${esc(x.id)}" ${x.id === id ? "selected" : ""}>${esc(x.n)} · ${x.series} ${x.series === 1 ? "serie" : "series"}</option>`).join("")}</select>`;
+  const que = estimado ? "Máximo estimado por semana, con las series que tienen RPE (tabla de p.64)." : "Kilos de tu mejor serie de cada semana.";
+  const ultimo = est[est.length - 1], mb = metaBanca_();
+  const meta = id === "banca" && mb ? `<p class="small" style="margin:8px 0 0;color:var(--tx2)">Con ${f(mb.kg)} kg hoy ≈ <b class="mono">${repsTxt(repsDePct(mb.kg / (ultimo ? ultimo.v : rmDe(st.actual, "banca")) * 100))} reps</b> (p.64). Tu meta: <b class="mono">${mb.reps}</b>.</p>` : "";
   // geometría
   const VW = 360, VH = 190, L = 40, R = 14, T = 16, B = 26;
   const x0 = Math.max(1, Math.min(pts[0].w, st.actual - 4)), x1 = Math.max(st.actual, x0 + 1);
-  const vals = pts.map(p => p.v).concat(ref);
-  const y0 = Math.floor((Math.min(...vals) - 4) / 5) * 5, y1 = Math.ceil((Math.max(...vals) + 4) / 5) * 5;
+  const vals = pts.map(p => p.v).concat(ref != null ? [ref] : []);
+  const y0 = Math.max(0, Math.floor((Math.min(...vals) - 4) / 5) * 5), y1 = Math.ceil((Math.max(...vals) + 4) / 5) * 5;
   const X = w => L + (w - x0) / (x1 - x0) * (VW - L - R), Y = v => T + (y1 - v) / (y1 - y0) * (VH - T - B);
   const paso = (y1 - y0) > 30 ? 10 : 5, grid = [];
   for (let v = y0; v <= y1; v += paso) grid.push(`<line x1="${L}" x2="${VW - R}" y1="${Y(v)}" y2="${Y(v)}" style="stroke:var(--line)" stroke-width="1"/><text x="${L - 6}" y="${Y(v) + 3.5}" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" style="fill:var(--mut)">${v}</text>`);
   const cada = (x1 - x0) > 10 ? 2 : 1, xs = [];
   for (let w = x0; w <= x1; w += cada) xs.push(`<text x="${X(w)}" y="${VH - 8}" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" style="fill:var(--mut)">S${w}</text>`);
   const linea = pts.length > 1 ? `<path d="${pts.map((p, i) => (i ? "L" : "M") + X(p.w).toFixed(1) + " " + Y(p.v).toFixed(1)).join(" ")}" fill="none" style="stroke:var(--acc)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` : "";
-  const refY = Y(ref);
-  const puntos = pts.map((p, i) => `<circle class="hit" data-pt="${i}" cx="${X(p.w)}" cy="${Y(p.v)}" r="16" fill="transparent" tabindex="0" role="button" aria-label="${esc(tipAvance(p))}"/><circle class="pt" cx="${X(p.w)}" cy="${Y(p.v)}" r="4.5" style="fill:var(--acc);stroke:var(--bg)" stroke-width="2" pointer-events="none"/>`).join("");
-  const sel = pts[ui.avPt != null && pts[ui.avPt] ? ui.avPt : pts.length - 1];
-  return `${seg}
-    <figure class="chart" style="margin:12px 0 0">
-      <svg viewBox="0 0 ${VW} ${VH}" role="img" aria-label="${esc(LIFT_N[lift])}: máximo estimado por semana">
-        ${grid.join("")}${xs.join("")}
-        <line x1="${L}" x2="${VW - R}" y1="${refY}" y2="${refY}" style="stroke:var(--faint)" stroke-width="1.5" stroke-dasharray="4 4"/>
-        <text x="${VW - R}" y="${refY - 5}" text-anchor="end" font-family="IBM Plex Sans, sans-serif" font-size="10.5" style="fill:var(--mut)">máximo del plan ${f(ref)}</text>
-        ${linea}${puntos}
+  const puntos = pts.map((p, i) => `<circle class="hit" data-pt="${i}" cx="${X(p.w)}" cy="${Y(p.v)}" r="16" fill="transparent" tabindex="0" role="button" aria-label="${esc(tipAvance(p, estimado))}"/><circle class="pt" cx="${X(p.w)}" cy="${Y(p.v)}" r="4.5" style="fill:var(--acc);stroke:var(--bg)" stroke-width="2" pointer-events="none"/>`).join("");
+  const elegido = pts[ui.avPt != null && pts[ui.avPt] ? ui.avPt : pts.length - 1];
+  const refSvg = ref != null ? `<line x1="${L}" x2="${VW - R}" y1="${Y(ref)}" y2="${Y(ref)}" style="stroke:var(--faint)" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <text x="${VW - R}" y="${Y(ref) - 5}" text-anchor="end" font-family="IBM Plex Sans, sans-serif" font-size="10.5" style="fill:var(--mut)">máximo del plan ${f(ref)}</text>` : "";
+  return `${sel}
+    <p class="small mut" style="margin:8px 0 0">${que}</p>
+    <figure class="chart" style="margin:8px 0 0">
+      <svg viewBox="0 0 ${VW} ${VH}" role="img" aria-label="${esc(ej.n)}: ${estimado ? "máximo estimado" : "mejor serie"} por semana">
+        ${grid.join("")}${xs.join("")}${refSvg}${linea}${puntos}
       </svg>
-      <figcaption class="small" id="av-tip" style="color:var(--tx2);margin-top:6px">${esc(tipAvance(sel))}</figcaption>
+      <figcaption class="av-tip" id="av-tip">${esc(tipAvance(elegido, estimado))}</figcaption>
     </figure>
     ${meta}
-    <details class="more" style="margin-top:8px"><summary>Ver los datos</summary><div><table><thead><tr><th>Semana</th><th class="n">Máximo estimado</th><th class="n">Mejor serie</th></tr></thead><tbody>
-      ${pts.map(p => `<tr><td class="mono">S${p.w}</td><td class="n">${kg(r05(p.v))}</td><td class="n">${f(p.kg)} × ${p.reps} @ ${f(p.rpe)}</td></tr>`).join("")}
-      ${sinRpe.map(w => `<tr><td class="mono">S${w}</td><td class="n mut">sin RPE</td><td class="n mut">—</td></tr>`).join("")}
-      ${margen.map(w => `<tr><td class="mono">S${w}</td><td class="n mut">mucho margen</td><td class="n mut">—</td></tr>`).join("")}
+    <details class="more" style="margin-top:8px"><summary>Ver los datos</summary><div><table><thead><tr><th>Semana</th><th class="n">${estimado ? "Máximo estimado" : "Mejor serie"}</th><th class="n">${estimado ? "Mejor serie" : "RPE"}</th></tr></thead><tbody>
+      ${pts.map(p => estimado ? `<tr><td class="mono">S${p.w}</td><td class="n">${kg(r05(p.v))}</td><td class="n">${f(p.kg)} × ${p.reps} @ ${f(p.rpe)}</td></tr>`
+        : `<tr><td class="mono">S${p.w}</td><td class="n">${f(p.kg)} kg × ${p.reps}</td><td class="n">${p.rpe != null ? f(p.rpe) : "—"}</td></tr>`).join("")}
+      ${estimado ? sinRpe.map(w => `<tr><td class="mono">S${w}</td><td class="n mut">sin RPE</td><td class="n mut">—</td></tr>`).join("") : ""}
+      ${estimado ? margen.map(w => `<tr><td class="mono">S${w}</td><td class="n mut">mucho margen</td><td class="n mut">—</td></tr>`).join("") : ""}
     </tbody></table></div></details>`;
 }
 
@@ -1179,7 +1219,7 @@ const BLOQUES = [
   {c: "C4", t: "Taper y test del año", w: "S52", col: "var(--f-test)", x: "La semana 8 de p.132 junta taper y test. El AMRAP con 100 kg cierra el año; el AMRAP es el test que el libro usa para hipertrofia (p.136)."},
 ];
 /* A otra persona: sin tu M3 ni tu meta de 100 kg (el AMRAP va al 70 % de su máximo, ver cargaAmrap). */
-const bloqueX = b => esTuyo() ? b.x : b.w === "S11–S18"
+const bloqueX = b => esTuyo() ? conMeta(b.x) : b.w === "S11–S18"
   ? "Dos olas de intensificación (S11–S13 y S15–S17), descarga con re-test en S14 y test en S18. El libro pone uno o dos bloques de intensidad tras la acumulación, con test al final (p.248)."
   : b.x.replace(/AMRAP con 100 kg/g, "AMRAP con el 70 % de tu máximo");
 const bloqueT = b => !esTuyo() && b.w === "S11–S18" ? "Fuerza · dos olas" : b.t;
@@ -1612,7 +1652,7 @@ function renderSheet(primera) {
         <p class="small mut">Lo tenue es lo sugerido por el plan: una serie con algo anotado toma lo sugerido en lo que dejes vacío. El RPE nunca se inventa.</p>
         <div class="btn-row"><button class="btn" data-igual>Igual al plan</button><button class="btn quiet" data-omit>No lo hice</button></div>
         <label class="fl">Comentario<textarea class="inp" rows="2" data-com placeholder="Cómo te sentiste, técnica, dolor… (opcional)">${esc(sheet.com)}</textarea></label>
-        ${sig ? `<div class="sig"><span class="k">Siguiente</span><b>${esc(sig.n)}</b><span class="v">${esc(planTxt(s, sig))}</span></div>` : ""}
+        ${sig ? `<div class="sig"><span class="k">Siguiente</span><b>${esc(conMeta(sig.n))}</b><span class="v">${esc(planTxt(s, sig))}</span></div>` : ""}
       </div>
       <div class="sheet-foot">${controlesDescanso(it)}<div class="dock-in">${anilloHtml(descanso(it))}
         <div class="dock-txt"><span class="k">Guardar el ejercicio</span><span class="v" id="sh-sum">${sumTxt()}</span></div>
@@ -2119,14 +2159,16 @@ document.addEventListener("input", e => {
 /* Puntos del gráfico de avance: tocar o enfocar muestra el detalle debajo. */
 function mostrarPunto(el) {
   ui.avPt = Number(el.dataset.pt);
-  const p = serieAvance(ui.av).pts[ui.avPt], tip = $("#av-tip");
-  if (p && tip) tip.textContent = tipAvance(p);
+  const a = serieAvance(ui.av), estimado = a.pts.length > 0 && (!!LIFT_N[ui.av] || a.pts.length === a.mejores.length), p = (estimado ? a.pts : a.mejores)[ui.avPt], tip = $("#av-tip");
+  if (p && tip) tip.textContent = tipAvance(p, estimado);
 }
 document.addEventListener("click", e => { const h = e.target.closest && e.target.closest(".hit"); if (h) mostrarPunto(h); });
 document.addEventListener("focusin", e => { if (e.target.classList && e.target.classList.contains("hit")) mostrarPunto(e.target); });
 document.addEventListener("change", e => {
   const t = e.target;
   if (t.id === "cat-file") { const f = t.files && t.files[0]; t.value = ""; if (f) importarCatalogo(f); return; }
+  if ("avSel" in t.dataset) { ui.av = t.value; ui.avPt = null; renderAno(); return; }
+  if (t.dataset.meta || t.dataset.metamed) { cambiarMeta(t.dataset.meta || t.dataset.metamed, t.value); renderAno(); return; }
   // anotaste las reps de una serie de esta semana: empieza el descanso de ese ejercicio
   if (sheet && sheet.tipo === "reg" && t.dataset.f === "reps" && t.value.trim() && sheet.w === st.actual) {
     iniciarDescanso(segundosDescanso(descanso(sheet.it)), nombrePlan(sheet.it));

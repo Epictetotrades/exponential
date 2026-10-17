@@ -358,6 +358,17 @@ textarea.inp { resize: vertical; }
 .rt-in { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 8px; align-items: end; }
 .rt-rpe { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .med { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+/* Medidas: una fila por medida (nombre, último valor y meta arriba; Hoy y Meta abajo) */
+.med-l { display: flex; flex-direction: column; margin-top: 8px; }
+.med-f { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 14px 0; border-top: 1px solid var(--line); }
+.med-n { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 2px; }
+.med-n b { font-size: 17px; font-weight: 600; }
+.med-n span { font: 14px/1.4 var(--mono); color: var(--tx2); }
+.med-n .med-meta { font: 500 14px/1.4 var(--sans); color: var(--acc); }
+.meta-ed { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+/* Avance: el ejercicio se elige en una lista */
+.av-sel { width: 100%; min-height: 48px; font-size: 16px; }
+.av-tip { margin-top: 6px; font-size: 14px; line-height: 1.45; color: var(--tx2); }
 .kpis .kpi .d { color: var(--mut); }
 
 /* ── Año ── */
