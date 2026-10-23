@@ -7,6 +7,7 @@
 /* ── versión: súbela en cada publicación (y la etiqueta vX.Y en git). Después de x.9 sigue (x+1).0:
    «1.10» se lee 1,1 y parece anterior a la 1.9. ── */
 const VERSIONES = [
+  {n: "2.9", nombre: "Descanso más sutil", fecha: "23 oct 2026", txt: "La barra del descanso se ve solo en Hoy. Un toque al anillo inicia el descanso y otro lo para, sin menú. En las otras pestañas el descanso sigue corriendo y al terminar te avisa."},
   {n: "2.8", nombre: "Usar un programa", fecha: "23 oct 2026", txt: "En Más › Programas, «Usar desde la próxima semana» (o desde esta) convierte el programa en tu plan: Hoy, Semana y Año lo siguen y se repite hasta la S52. Lo anterior no cambia y puedes dejarlo cuando quieras. Las fichas muestran cada día en su recuadro y los nombres ya no se repiten. Los textos que se leen son más grandes y oscuros, y cada «p.64» abre esa página del libro: el PDF se abre una vez y queda en el teléfono."},
   {n: "2.7", nombre: "Avance de todo y metas tuyas", fecha: "17 oct 2026", txt: "Avance muestra cualquier ejercicio que hayas anotado (los básicos con su máximo estimado; los demás, tu mejor serie de cada semana). Las metas de banca y de medidas se cambian en Año, y Medidas quedó en una sola lista."},
   {n: "2.6", nombre: "Catálogo en zip", fecha: "17 oct 2026", txt: "El catálogo se manda por WhatsApp como exponential-catalogo.zip y la app lo abre tal cual, sin descomprimirlo."},
@@ -1136,8 +1137,8 @@ function avanceHtml() {
 }
 
 /* ── barra inferior: descanso y serie en curso ──
-   La misma barra en todas las pestañas: el anillo cuenta el descanso y el botón guarda la serie que
-   tienes abierta en Hoy. Sin serie abierta, solo aparece mientras corre un descanso. */
+   Solo en Hoy: el anillo cuenta el descanso y el botón guarda la serie abierta. Un toque al anillo inicia el
+   descanso y otro lo para. En las otras pestañas no se ve, pero el descanso sigue y avisa al terminar. */
 const TKEY = "exp-descanso";
 const ANILLO = 138.2;  // 2πr, r = 22
 let descansoT = null, reloj = null, audioCtx = null;
@@ -1183,7 +1184,7 @@ function tickDescanso() {
   if (!descansoT) return;
   const r = quedan();
   if (r <= 0) { const n = descansoT.nombre; pararDescanso(); avisoDescanso(); toast(`Descanso terminado${n ? " · " + n : ""}. A la siguiente serie.`); return; }
-  if (!$("#dock-t") && !sheet) renderDock();
+  if (!$("#dock-t") && !sheet && ui.tab === "hoy") renderDock();
   const t = $("#dock-t"), p = $("#dock-p");
   if (t) t.textContent = mmss(r);
   if (p) p.setAttribute("stroke-dasharray", `${(Math.min(1, Math.max(0, 1 - r / (descansoT.total || r))) * ANILLO).toFixed(1)} ${ANILLO}`);
@@ -1192,24 +1193,18 @@ function tickDescanso() {
 function anilloHtml(plan) {
   const r = quedan(), hecho = descansoT ? Math.min(1, Math.max(0, 1 - r / (descansoT.total || r || 1))) : 0;
   const txt = descansoT ? mmss(Math.max(0, r)) : plan ? plan.replace(" min", "′").replace(/ en par$/, "") : "";
-  return `<button class="anillo" data-anillo aria-label="Descanso${descansoT ? ": quedan " + mmss(Math.max(0, r)) : ""}. Controles del descanso">
+  return `<button class="anillo" data-anillo aria-label="${descansoT ? "Parar el descanso: quedan " + mmss(Math.max(0, r)) : "Iniciar el descanso"}">
     <svg viewBox="0 0 52 52" aria-hidden="true"><circle class="tr" cx="26" cy="26" r="22"/><circle class="pr" id="dock-p" cx="26" cy="26" r="22" stroke-dasharray="${(hecho * ANILLO).toFixed(1)} ${ANILLO}" transform="rotate(-90 26 26)"/></svg>
     <span id="dock-t">${txt}</span></button>`;
-}
-function controlesDescanso(it) {
-  if (!ui.dockCtl) return "";
-  return `<div class="dock-ctl" role="group" aria-label="Descanso">${descansoT
-    ? `<button data-tmas="-30">−30 s</button><button data-tmas="30">+30 s</button><button data-tstop>Parar</button>`
-    : `<button data-descanso>Iniciar descanso${it ? " · " + esc(descanso(it)) : ""}</button>`}</div>`;
 }
 const itemEdit = () => edit ? itemDeClave(edit.w, edit.key) : null;
 function valorEdit() { return edit ? serieTxt({kg: edit.kg, reps: edit.reps, rpe: edit.rpe}) : ""; }
 function renderDock() {
   const root = $("#dock-root"), it = itemEdit(); if (!root) return;
-  const ver = !sheet && (it || descansoT);
+  const ver = !sheet && ui.tab === "hoy" && (it || descansoT);
   document.body.classList.toggle("con-dock", !!ver);
   if (!ver) { root.innerHTML = ""; return; }
-  root.innerHTML = `<div class="dock">${controlesDescanso(it)}<div class="dock-in">
+  root.innerHTML = `<div class="dock"><div class="dock-in">
     ${anilloHtml(it ? descanso(it) : "")}
     <div class="dock-txt"><span class="k" id="dock-l">${it ? `Serie ${edit.idx + 1} · ${esc(nombrePlan(it))}` : `Descanso${descansoT.nombre ? " · " + esc(descansoT.nombre) : ""}`}</span><span class="v" id="dock-v">${it ? esc(valorEdit()) : "a la siguiente serie"}</span></div>
     ${it ? `<button class="dock-ok" data-guardarset aria-label="Guardar la serie ${edit.idx + 1}">${ICON.ok}</button>`
@@ -1858,7 +1853,7 @@ function renderSheet(primera) {
         <label class="fl">Comentario<textarea class="inp" rows="2" data-com placeholder="Cómo te sentiste, técnica, dolor… (opcional)">${esc(sheet.com)}</textarea></label>
         ${sig ? `<div class="sig"><span class="k">Siguiente</span><b>${esc(conMeta(sig.n))}</b><span class="v">${esc(planTxt(s, sig))}</span></div>` : ""}
       </div>
-      <div class="sheet-foot">${controlesDescanso(it)}<div class="dock-in">${anilloHtml(descanso(it))}
+      <div class="sheet-foot"><div class="dock-in">${anilloHtml(descanso(it))}
         <div class="dock-txt"><span class="k">Guardar el ejercicio</span><span class="v" id="sh-sum">${sumTxt()}</span></div>
         <button class="dock-ok" data-save aria-label="Guardar el ejercicio">${ICON.ok}</button></div></div>
     </div></div>`;
@@ -2262,7 +2257,12 @@ document.addEventListener("click", async e => {
     st.medidas = (st.medidas || []).concat([m]);
     dirty.estado = marca(); pedirGuardado(300); renderAno(); toast("Medición guardada."); return;
   }
-  if ("anillo" in ds) { ui.dockCtl = !ui.dockCtl; if (sheet) renderSheet(); else renderDock(); return; }
+  if ("anillo" in ds) {  // un toque inicia el descanso; con el descanso corriendo, lo para
+    if (descansoT) return pararDescanso();
+    const it = sheet && sheet.it ? sheet.it : itemEdit();
+    if (it) iniciarDescanso(segundosDescanso(descanso(it)), nombrePlan(it));
+    return;
+  }
   if (ds.selrow !== undefined && sheet) { sheet.sel = Number(ds.selrow); renderSheet(); return; }
   if (ds.open) return abrirRegistro(ui.week, ds.open);
   if (ds.extraOpen) return abrirExtra(ds.extraOpen);
@@ -2279,16 +2279,7 @@ document.addEventListener("click", async e => {
   if (ds.progsem) { ui.cat.sem = Math.max(0, ui.cat.sem + Number(ds.progsem)); renderMas(); const h = $(".prog-sem"); if (h) h.scrollIntoView({block: "start"}); return; }
   if (ds.tema) { tema.modo = ds.tema; guardarTema(); renderMas(); return; }
   if (ds.av) { ui.av = ds.av; ui.avPt = null; renderAno(); return; }
-  if (ds.tmas) {
-    if (descansoT) { descansoT.fin = Math.max(Date.now() + 5000, descansoT.fin + Number(ds.tmas) * 1000); descansoT.total = Math.max(descansoT.total || 0, quedan()); guardarDescanso(); tickDescanso(); }
-    return;
-  }
   if ("tstop" in ds) return pararDescanso();
-  if ("descanso" in ds) {
-    const it = sheet && sheet.it ? sheet.it : itemEdit();
-    if (it) { ui.dockCtl = false; iniciarDescanso(segundosDescanso(descanso(it)), nombrePlan(it)); if (sheet) renderSheet(); }
-    return;
-  }
   if (ds.delx) {
     const w = ui.week, k = "x~" + ds.delx, i = Number(ds.i);
     if (!LOG[w] || !LOG[w][k]) return;
