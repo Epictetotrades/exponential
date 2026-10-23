@@ -7,6 +7,7 @@
 /* ── versión: súbela en cada publicación (y la etiqueta vX.Y en git). Después de x.9 sigue (x+1).0:
    «1.10» se lee 1,1 y parece anterior a la 1.9. ── */
 const VERSIONES = [
+  {n: "2.8", nombre: "Usar un programa", fecha: "23 oct 2026", txt: "En Más › Programas, «Usar desde la próxima semana» (o desde esta) convierte el programa en tu plan: Hoy, Semana y Año lo siguen y se repite hasta la S52. Lo anterior no cambia y puedes dejarlo cuando quieras. Las fichas muestran cada día en su recuadro y los nombres ya no se repiten. Los textos que se leen son más grandes y oscuros, y cada «p.64» abre esa página del libro: el PDF se abre una vez y queda en el teléfono."},
   {n: "2.7", nombre: "Avance de todo y metas tuyas", fecha: "17 oct 2026", txt: "Avance muestra cualquier ejercicio que hayas anotado (los básicos con su máximo estimado; los demás, tu mejor serie de cada semana). Las metas de banca y de medidas se cambian en Año, y Medidas quedó en una sola lista."},
   {n: "2.6", nombre: "Catálogo en zip", fecha: "17 oct 2026", txt: "El catálogo se manda por WhatsApp como exponential-catalogo.zip y la app lo abre tal cual, sin descomprimirlo."},
   {n: "2.5", nombre: "Catálogo por archivo", fecha: "17 oct 2026", txt: "El catálogo se abre solo desde su archivo, por ejemplo el que te mandan por WhatsApp; la app ya no lo busca en el repositorio."},
@@ -265,7 +266,7 @@ function pedirGuardado(ms = 700) {
   clearTimeout(flushTimer);
   flushTimer = setTimeout(() => enCola(flush), ms);
 }
-const pendientes = () => (dirty.estado ? 1 : 0) + (dirty.prog ? 1 : 0) + (dirty.perfil ? 1 : 0) + Object.keys(dirty.weeks).length;
+const pendientes = () => (dirty.estado ? 1 : 0) + (dirty.prog ? 1 : 0) + (dirty.perfil ? 1 : 0) + (dirty.programa ? 1 : 0) + Object.keys(dirty.weeks).length;
 function errorDeRed(e) { return e instanceof TypeError || !navigator.onLine; }
 
 async function flush() {
@@ -279,6 +280,12 @@ async function flush() {
       const r = await getFile("perfil.json");
       await putFile("perfil.json", perfil, r.sha);
       if (dirty.perfil === v) dirty.perfil = false;
+    }
+    if (dirty.programa) {
+      const v = dirty.programa;
+      const r = await getFile("programa.json");
+      await putFile("programa.json", st.programa || {ninguno: true}, r.sha);
+      if (dirty.programa === v) dirty.programa = false;
     }
     if (dirty.estado) {
       const v = dirty.estado;
@@ -338,6 +345,11 @@ async function pull() {
       const pf = await getFile("perfil.json");
       if (pf.data && !dirty.perfil) perfil = pf.data;
       perfilRevisado = true;
+    }
+    const pg = await getFile("programa.json");
+    if (pg.data && !dirty.programa) {
+      const nuevo = pg.data.ninguno ? null : pg.data;
+      if (JSON.stringify(nuevo) !== JSON.stringify(st.programa || null)) { st.programa = nuevo; aplicarPlan(); }
     }
     const e = await getFile("estado.json");
     if (e.data && !dirty.estado) {
@@ -401,7 +413,7 @@ function repsDePct(p) {
   return 11.5 + (70 - p) / 2.5;
 }
 function repsTxt(x) { const a = Math.floor(x + 0.25), b = Math.ceil(x - 0.25); return a === b ? String(a) : a + "–" + b; }
-function rango(r) { const m = String(r).split(/[–-]/).map(Number).filter(x => !isNaN(x)); return [m[0], m[m.length - 1]]; }
+function rango(r) { const m = String(r).replace(/,/g, ".").split(/[–-]/).map(Number).filter(x => !isNaN(x)); return [m[0], m[m.length - 1]]; }
 function e1rm(x) { const k = +x.kg, r = +x.reps, rp = +x.rpe; if (!k || !r || !rp) return 0; return k * 100 / pctDeReps(r + (10 - rp)); }
 /* Una serie sirve para estimar el máximo si quedan ~6 reps o menos hasta el fallo: sobre ~5 reps la
    estimación pierde precisión (p.115, p.120). Así una descarga a RPE 6 no baja tu máximo, y un single
@@ -418,6 +430,7 @@ function rmDe(w, lift) {
   return DATA.rm_inicial[lift];
 }
 function descanso(it) {
+  if (it.descanso) return it.descanso;  // el que trae el programa del catálogo
   if (it.k === "single") return "3–5 min";
   if (it.k === "main") return (Number(it.reps) || 5) <= 6 ? "3–5 min" : "2–3 min";
   if (it.k === "pot") return /sprint/i.test(it.n) ? "2–3 min" : "2 min";
@@ -466,7 +479,7 @@ function mezclar(a, b) {
   if (del.length) out._del = del;
   return out;
 }
-const opcionesHecho = it => [[it.ex, nombrePlan(it) + " (plan)"]].concat(ALT[it.ex] ? ALT[it.ex].op : []);
+const opcionesHecho = it => [[it.ex, nombrePlan(it) + " (plan)"]].concat(ALT[it.ex] ? ALT[it.ex].op : [], it.alt ? it.alt.map(n => [slug(n), n]) : []);
 const hechoDe = (prev, it) => prev && prev.hecho ? prev.hecho : {id: it.ex, n: nombrePlan(it)};
 const registrado = prev => !!(prev && (prev.omitido || (prev.sets && prev.sets.length)));
 function cargaSugerida(s, it, hid) {
@@ -559,13 +572,13 @@ const cicloD = c => c.id === "C1" && !esTuyo() ? "S1–S10 Pirámide · S11–S1
    de la tabla de p.64 (11–12 reps), para que el resultado caiga dentro de la tabla. */
 const cargaAmrap = s => { const mb = metaBanca_(); return mb ? mb.kg : r25(rmDe(s.w, "banca") * 0.7); };
 function planTxt(s, it) {
-  if (it.k === "main") return `${it.sets} × ${it.reps} · ${kg(r25(rmDe(s.w, it.lift) * it.pct / 100))} · RPE ${it.rpe}`;
+  if (it.k === "main") return `${it.sets} × ${it.reps} · ${kg(r25(rmDe(s.w, it.lift) * it.pct / 100))}${it.rpe ? " · RPE " + it.rpe : ""}`;
   if (it.k === "single") { const rm = rmDe(s.w, it.lift); return `${kg(r25(rm * .8))} → ${kg(r25(rm * .9))} → single a RPE ${it.rpe}`; }
   if (it.k === "amrap") return `1 serie al máximo con ${kg(cargaAmrap(s))}`;
   if (it.k === "pot") return it.pres + (it.pct ? " · " + kg(r25(rmDe(s.w, it.lift) * it.pct / 100)) : "");
   const pr = PROG[it.ex], usaReg = pr && pr.w < s.w && pr.reps === String(it.reps) && pr.next;
   const carga = it.pc ? " · peso corporal" : usaReg ? ` · ≈ ${kg(pr.next)}` : it.kg ? ` · ≈ ${kg(it.kg)}` : "";
-  return `${it.sets} × ${it.reps}${carga} · RPE ${it.rpe}`;
+  return `${it.sets} × ${it.reps}${carga}${it.rpe ? " · RPE " + it.rpe : ""}`;
 }
 function detalleTxt(s, it) {
   const sub = [];
@@ -589,6 +602,8 @@ function detalleTxt(s, it) {
     if (it.aps) sub.push(`En par con ${it.aps}, ~1 min entre series (p.179).`);
     if (it.lado) sub.push(`Por lado: anota cada lado por separado, empezando por el ${esTuyo() ? "izquierdo" : "más débil"}.`);
   }
+  if (it.txt && it.k !== "nota" && it.k !== "pot") sub.push(it.txt);
+  if (it.alt) sub.push(`Si hoy no va: ${it.alt.join(" o ")}. Elígela en «Hiciste» y carga por RPE.`);
   const a = ALT[it.ex];
   const ac = a && (esTuyo() || !/tu preferida/.test(a.c)) ? a.c : "";  // «la máquina es tu preferida» es tuyo
   if (a) sub.push(`Si hoy no va: ${a.op.map(o => o[1]).join(" o ")}${ac ? " — " + ac : ""}. Elígela en «Hiciste» y carga por RPE.`);
@@ -911,9 +926,9 @@ function renderSemana() {
     ${lifts.length ? `<h2>Básicos</h2><div class="lifts">${lifts.join("")}</div>` : ""}
     ${notas.length ? `<h2>Tus notas</h2><div class="notas-l">${notas.map(([t, x]) => `<div class="nota-i"><span class="k">${esc(t)}</span><p>“${esc(x)}”</p></div>`).join("")}</div>` : ""}
     ${faltan.length ? `<h2>Sin registrar · ${faltan.length}</h2><div class="chips">${faltan.map(x => `<span class="pill fal">${esc(x)}</span>`).join("")}</div>` : ""}
-    <h2>Volumen ${s.w === st.actual ? "de esta semana" : "de la semana"}</h2>
+    ${s.programa ? `<p class="small mut" style="margin-top:24px">El volumen por músculo se calcula solo en el plan Exponential.</p>` : `<h2>Volumen ${s.w === st.actual ? "de esta semana" : "de la semana"}</h2>
     <p class="small mut">Series por músculo con la tabla de <span class="pg">p.214</span>: primario 1, secundario 0,5 (${esTuyo() ? "tu regla" : "regla de Pelland 2026"}). ${!plantilla && s.w <= st.actual ? `El borde es el plan; el relleno, lo que anotaste.${s.w < st.actual ? " En color, donde faltaron 2 series o más." : ""} ` : ""}La franja es el rango 10–20 <span class="pg">p.62</span>. El día de potencia no cuenta <span class="pg">p.139</span>.</p>
-    ${barras(volumenSemana(s, false), !plantilla && s.w <= st.actual ? volumenSemana(s, true) : null, s.w < st.actual)}
+    ${barras(volumenSemana(s, false), !plantilla && s.w <= st.actual ? volumenSemana(s, true) : null, s.w < st.actual)}`}
     ${s.w !== st.actual ? `<div class="acciones"><button class="btn" data-actual="${s.w}">Marcar la semana ${s.w} como actual</button></div>` : ""}`;
 }
 
@@ -985,16 +1000,17 @@ function tablaMaximos() {
 function renderAno() {
   cargarHistorial();
   const s = W[st.actual - 1];
-  const prox = TESTS.filter(t => t >= st.actual).slice(0, 2);
+  const prox = TESTS.filter(t => t >= st.actual && !(W[t - 1] || {}).programa).slice(0, 2);
   const b = rmDe(st.actual, "banca");
   const ciclos = CICLOS.map(c => {
     const ws = W.filter(x => x.w >= c.w[0] && x.w <= c.w[1]);
     return `<div class="cyc"><div class="cyc-h"><h3>${esc(c.n)}</h3><span class="small mut">S${c.w[0]}–S${c.w[1]} · ${esc(cicloD(c))}</span></div>
-      <div class="cells">${ws.map(x => `<button class="cell${x.w < st.actual ? " done" : ""}${x.w === st.actual ? " now" : ""}${TESTS.includes(x.w) ? " t" : ""}" style="background:${colorSemana(x)}" data-goweek="${x.w}" aria-label="Semana ${x.w}: ${esc(etiqueta(x))}">${x.w}</button>`).join("")}</div>
+      <div class="cells">${ws.map(x => `<button class="cell${x.w < st.actual ? " done" : ""}${x.w === st.actual ? " now" : ""}${TESTS.includes(x.w) && !x.programa ? " t" : ""}" style="background:${colorSemana(x)}" data-goweek="${x.w}" aria-label="Semana ${x.w}: ${esc(etiqueta(x))}">${x.w}</button>`).join("")}</div>
       <p class="small mut" style="margin-top:8px">${resumenBloques(ws)}</p></div>`;
   }).join("");
   $("#v-ano").innerHTML = `
     <div class="titulo"><h1>Tu año</h1><p class="sub">Vas en la semana ${st.actual}. Toca una semana para abrirla.</p></div>
+    ${st.programa ? `<div class="ctx"><span>Desde la S${st.programa.desde}: ${esc(st.programa.nombre)}</span></div>` : ""}
     <div class="stats"><div><span class="k">ESTÁS EN</span><span class="n">S${st.actual}</span></div><div><span class="k">PRÓX. TEST</span><span class="n">${prox.length ? "S" + prox[0] : "año 2"}</span></div><div><span class="k">BANCA</span><span class="n">${f(b)}</span></div></div>
     <h2>Tu avance</h2>
     ${avanceHtml()}
@@ -1126,9 +1142,13 @@ const TKEY = "exp-descanso";
 const ANILLO = 138.2;  // 2πr, r = 22
 let descansoT = null, reloj = null, audioCtx = null;
 try { descansoT = JSON.parse(localStorage.getItem(TKEY) || "null"); } catch (e) {}
-const segundosDescanso = txt => { const m = String(txt).match(/(\d+)/); return m ? +m[1] * 60 : 120; };  // el mínimo del rango
+const segundosDescanso = txt => {  // el mínimo del rango; «30 s» va en segundos y «sin pausa» es 0
+  const t = String(txt), m = t.match(/(\d+(?:[.,]\d+)?)/); if (!m) return /sin pausa/.test(t) ? 0 : 120;
+  const v = parseFloat(m[1].replace(",", ".")); return /\d\s*(s|sec|seg)\b/.test(t) && !/min/.test(t) ? v : v * 60;
+};
 function guardarDescanso() { try { descansoT ? localStorage.setItem(TKEY, JSON.stringify(descansoT)) : localStorage.removeItem(TKEY); } catch (e) {} }
 function iniciarDescanso(seg, nombre) {
+  if (!(seg > 0)) return;
   try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
   descansoT = {fin: Date.now() + seg * 1000, total: seg, nombre};
   guardarDescanso();
@@ -1456,6 +1476,113 @@ function archivoHtml() {
       </ol>
     </div>`;
 }
+/* ── El libro: cada «p.64» abre esa página del PDF de La Pirámide (entrenamiento, v2.0) guardado en este teléfono.
+   El PDF no va dentro de la app porque su repositorio es público: se abre una vez desde el archivo, como el catálogo.
+   La página del PDF es la misma del libro (p.64 = la tabla de % del 1RM). ── */
+const LIBRO_CACHE = "exp-libro", libroUrl = () => new URL("libro/piramide-entrenamiento.pdf", location.href).href;
+let LIBRO = null, visor = null;  // LIBRO: el PDF abierto con pdf.js; visor: {pag, zoom, tarea}
+const cargarScript = src => new Promise((ok, mal) => { const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = mal; document.head.appendChild(s); });
+async function abrirPdf(buf) {
+  if (!window.pdfjsLib) await cargarScript("lib/pdf.min.js");
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "lib/pdf.worker.min.js";
+  return pdfjsLib.getDocument({data: new Uint8Array(buf)}).promise;
+}
+async function cargarLibro() {
+  if (LIBRO) return true;
+  if (typeof caches === "undefined") return false;
+  const r = await (await caches.open(LIBRO_CACHE)).match(libroUrl());
+  if (!r) return false;
+  LIBRO = await abrirPdf(await r.arrayBuffer());
+  return true;
+}
+async function importarLibro(file) {
+  let doc = null;
+  try {
+    const buf = await file.arrayBuffer();
+    if (new TextDecoder().decode(new Uint8Array(buf, 0, 5)) !== "%PDF-") { toast("Ese archivo no es un PDF."); return; }
+    const copia = new Blob([buf], {type: "application/pdf"});  // pdf.js se queda con el buffer: se guarda esta copia
+    doc = await abrirPdf(buf);
+    const p64 = doc.numPages >= 64 ? (await (await doc.getPage(64)).getTextContent()).items.map(i => i.str).join(" ") : "";
+    if (!/Percentage Of 1RM/i.test(p64)) { toast("Ese PDF no es La Pirámide de entrenamiento v2.0: sus páginas no coinciden."); return; }
+    await (await caches.open(LIBRO_CACHE)).put(libroUrl(), new Response(copia, {headers: {"Content-Type": "application/pdf"}}));
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+  } catch (e) { toast("No pude abrir ni guardar el PDF."); return; }
+  LIBRO = doc; toast("Libro guardado en este teléfono.");
+  if (visor) pintarVisor();
+}
+function abrirVisor(n) {
+  visor = {pag: n, zoom: 1};
+  document.body.style.overflow = "hidden";
+  try { if (!(history.state && history.state.libro)) history.pushState({libro: 1}, ""); } catch (e) {}
+  pintarVisor();
+}
+function cerrarVisor(desdeAtras) {
+  visor = null; document.body.style.overflow = sheet ? "hidden" : "";
+  const r = $("#libro-root"); if (r) r.innerHTML = "";
+  if (!desdeAtras && history.state && history.state.libro) { try { history.back(); } catch (e) {} }
+}
+const ayudaVisor = () => visor.zoom > 1 ? "Desliza para moverte. Toca para alejar." : "Toca la página para acercar.";
+async function pintarVisor() {
+  let r = $("#libro-root");
+  if (!r) { r = document.createElement("div"); r.id = "libro-root"; document.body.appendChild(r); }
+  const hay = await cargarLibro().catch(() => false);
+  if (!visor) return;
+  const n = visor.pag, total = hay ? LIBRO.numPages : 0;
+  r.innerHTML = `<div class="visor" role="dialog" aria-label="Libro, página ${n}">
+    <div class="visor-bar">
+      <button class="circ" data-libro-ir="${n - 1}" aria-label="Página anterior" ${!hay || n <= 1 ? "disabled" : ""}>${ICON.back}</button>
+      <span class="visor-t">La Pirámide · <b>p.${n}</b></span>
+      <button class="circ" data-libro-ir="${n + 1}" aria-label="Página siguiente" ${!hay || n >= total ? "disabled" : ""}>${ICON.next}</button>
+      <button class="link-btn" data-libro-cerrar>Cerrar</button></div>
+    ${hay ? `<div class="visor-pag"><canvas></canvas></div><p class="visor-ayuda">${ayudaVisor()}</p>`
+      : `<div class="visor-msg"><div class="panel"><p style="margin:0"><b>El libro no viene dentro de la app.</b> Ábrelo una vez desde el PDF <span class="mono">the-muscle-and-strength-training-pyramid-v20.pdf</span> y queda guardado en este teléfono.</p>
+        <label class="btn pri btn-archivo">Abrir el PDF del libro<input type="file" id="libro-file" accept="application/pdf,.pdf" hidden></label></div></div>`}
+  </div>`;
+  if (hay) pintarPagina();
+}
+async function pintarPagina(fx, fy) {
+  const caja = $("#libro-root .visor-pag"), cv = caja && caja.querySelector("canvas");
+  if (!cv || !visor) return;
+  const pagina = await LIBRO.getPage(visor.pag), base = pagina.getViewport({scale: 1});
+  const ancho = caja.clientWidth * visor.zoom, dpr = Math.min(window.devicePixelRatio || 1, 3);
+  const vp = pagina.getViewport({scale: ancho / base.width * dpr});
+  if (visor.tarea) visor.tarea.cancel();
+  cv.width = Math.floor(vp.width); cv.height = Math.floor(vp.height);
+  cv.style.width = ancho + "px"; cv.style.height = vp.height / dpr + "px";
+  visor.tarea = pagina.render({canvasContext: cv.getContext("2d"), viewport: vp});
+  if (fx != null) { caja.scrollLeft = fx * ancho - caja.clientWidth / 2; caja.scrollTop = fy * vp.height / dpr - caja.clientHeight / 2; }
+  try { await visor.tarea.promise; } catch (e) {}
+}
+function zoomVisor(e) {  // tocar la página: acerca 2,5 veces donde tocaste, o vuelve al ancho de la pantalla
+  const cv = e.target.closest("canvas"), b = cv.getBoundingClientRect();
+  visor.zoom = visor.zoom > 1 ? 1 : 2.5;
+  const ay = $("#libro-root .visor-ayuda"); if (ay) ay.textContent = ayudaVisor();
+  pintarPagina((e.clientX - b.left) / b.width, (e.clientY - b.top) / b.height);
+}
+/* Cada «p.64» se vuelve un enlace a esa página: los de las referencias (.pg) y los escritos dentro del texto,
+   como «(p.104–105)». Los de Nutrición no: ese libro no está. */
+const RE_PAG = /(?<![\wÀ-ÿ])p\.(\d+)(?:–\d+)?/g;
+const botonPag = (m, a, cls) => `<button class="${cls}" data-libro="${a}" aria-label="Ver la página ${a} del libro">${m}</button>`;
+function enlazarPaginas() {
+  document.querySelectorAll(".pg:not([data-enl])").forEach(el => {
+    el.dataset.enl = "1";
+    if (/Nutrici/.test(el.textContent) || el.closest("button, summary, a")) return;
+    el.innerHTML = esc(el.textContent).replace(RE_PAG, (m, a) => botonPag(m, a, "pg-a"));
+  });
+  const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {acceptNode: n =>
+    /p\.\d/.test(n.data) && !/Nutrici/.test(n.data) && n.parentElement && !n.parentElement.closest("button, a, summary, label, script, style, textarea, select, svg, .pg, .visor")
+      ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT});
+  const nodos = []; while (w.nextNode()) nodos.push(w.currentNode);
+  nodos.forEach(n => {
+    const t = document.createElement("template");
+    t.innerHTML = esc(n.data).replace(RE_PAG, (m, a) => botonPag(m, a, "pg-a pg-t"));
+    n.replaceWith(t.content);
+  });
+}
+if (typeof MutationObserver !== "undefined") {
+  const obs = () => { enlazarPaginas(); new MutationObserver(enlazarPaginas).observe(document.body, {childList: true, subtree: true}); };
+  if (document.body) obs(); else document.addEventListener("DOMContentLoaded", obs);
+}
 const semTxt = p => p.semanas ? `${p.semanas} sem` : "semana tipo";
 const diasDe = t => (String(t).match(/\d+/g) || []).map(Number);
 function pasaFiltro(p) {
@@ -1469,11 +1596,11 @@ function catalogoHtml() {
   if (!CATALOGO) { cargarCatalogo(); return `<p class="small mut" style="margin-top:16px">Abriendo el catálogo…</p>`; }
   const filtro = (tipo, ops) => `<div class="filtros" role="group">${ops.map(([id, n]) => `<button data-cat${tipo}="${id}" aria-pressed="${ui.cat[tipo] === id}">${n}</button>`).join("")}</div>`;
   const pag = p => { const m = p.fuente.match(/pág\. ([\d–, ]+\d)/); return m ? "p." + m[1] : ""; };
-  const fila = p => `<button class="prog-f" data-prog="${esc(p.id)}"><span class="prog-n">${esc(p.nombre)}</span><span class="prog-m">${esc(semTxt(p))} · ${esc(p.dias)} días</span>
-    <span class="prog-d">${esc([p.meta, p.nivel].filter(Boolean).join(" · "))}</span><span class="prog-p">${esc(pag(p))}</span></button>`;
+  const fila = p => `<button class="prog-f" data-prog="${esc(p.id)}"><span class="prog-n">${esc(nombreProg(p))}${st.programa && st.programa.id === p.id ? ' <span class="chip ok">en uso</span>' : ""}</span>
+    <span class="prog-d">${esc([p.dias + " días", semTxt(p), p.grupo === "ladder" ? p.meta.replace(/ · .*/, "") : p.meta, p.grupo === "ladder" ? "" : p.nivel].filter(Boolean).join(" · "))}</span></button>`;
   const s = W[st.actual - 1];
-  const tuPlan = `<button class="prog-f" data-tab="ano"><span class="prog-n">Exponential</span><span class="prog-m">${W.length} sem · ${s.dias.length} días</span>
-    <span class="prog-d">${esTuyo() ? "El que usas ahora · ábrelo en Año" : "El plan base de la app · ábrelo en Año"}</span><span class="prog-p"></span></button>`;
+  const tuPlan = `<button class="prog-f" data-tab="ano"><span class="prog-n">Exponential${st.programa ? "" : ' <span class="chip ok">en uso</span>'}</span>
+    <span class="prog-d">${st.programa ? `Hasta la S${st.programa.desde - 1} · ábrelo en Año` : `52 sem · ${(BASE || W)[0].dias.length} días · ábrelo en Año`}</span></button>`;
   const vis = CATALOGO.programas.filter(pasaFiltro);
   const grupos = CATALOGO.grupos.map(g => {
     const l = vis.filter(p => p.grupo === g.id);
@@ -1490,9 +1617,10 @@ function catalogoHtml() {
 }
 function ejCat(x) {
   const meta = [x.c, x.i, x.d].filter(Boolean).map(esc).join(" · ");
-  return `<div class="ej-c"><div class="ej-h"><b>${esc(x.n)}</b><span class="mono">${esc(x.s)} × ${esc(x.r)}</span></div>
-    ${meta ? `<span class="ej-m">${meta}</span>` : ""}${x.t ? `<span class="small">${esc(x.t)}</span>` : ""}
-    ${x.x ? `<span class="small mut">${esc(x.x)}</span>` : ""}${x.sub && x.sub.length ? `<span class="small mut">Sustitutos: ${esc(x.sub.join(" · "))}</span>` : ""}</div>`;
+  const mas = [x.t ? `Técnica: ${x.t}` : "", x.x || "", x.sub && x.sub.length ? `Sustitutos: ${x.sub.join(" · ")}` : ""].filter(Boolean);
+  return `<div class="ej-c"><div class="ej-h"><b>${esc(x.n)}</b><span class="ej-sr">${esc(x.s)} × ${esc(x.r)}</span></div>
+    ${meta ? `<span class="ej-m">${meta}</span>` : ""}
+    ${mas.length ? `<details class="ej-mas"><summary>Notas</summary>${mas.map(t => `<p>${esc(t)}</p>`).join("")}</details>` : ""}</div>`;
 }
 function fichaHtml() {
   const id = ui.cat.prog, P = FICHAS[id], idx = CATALOGO && CATALOGO.programas.find(p => p.id === id);
@@ -1501,18 +1629,94 @@ function fichaHtml() {
   if (!P) { cargarFicha(id); return `${volver}<p class="small mut" style="margin-top:16px">Abriendo el programa…</p>`; }
   const n = P.plan.length, w = Math.min(ui.cat.sem, n - 1), sem = P.plan[w];
   const series = sem.d.reduce((a, d) => a + d.e.reduce((b, x) => b + (+x.s || 0), 0), 0), conEj = sem.d.filter(d => d.e.length).length;
+  const activo = st.programa && st.programa.id === id, sig = Math.min(52, st.actual + 1);
+  const usar = activo
+    ? `<div class="usar"><p class="usar-ok">Lo usas desde la S${st.programa.desde}.</p><button class="btn quiet" data-dejar>Dejar este programa</button></div>`
+    : `<div class="usar"><button class="btn pri" data-usar="${esc(id)}" data-desde="${sig}">Usar desde la próxima semana (S${sig})</button>
+       ${sig !== st.actual ? `<button class="btn" data-usar="${esc(id)}" data-desde="${st.actual}">Usar desde esta semana (S${st.actual})</button>` : ""}</div>`;
   return `${volver}
-    <div class="titulo"><h1>${esc(P.nombre)}</h1><p class="sub">${[P.autor, semTxt(P), P.dias + " días", P.nivel].filter(Boolean).map(esc).join(" · ")}</p></div>
-    <div class="nota-plan"><span class="k">${esc(P.meta)}</span><p>${esc(P.resumen)}</p></div>
-    <div class="rule"><h3>Cómo progresar</h3><p>${esc(P.progresion)}</p></div>
-    ${P.aviso ? `<div class="rule"><h3>Nota de la transcripción</h3><p>${esc(P.aviso)}</p></div>` : ""}
+    <div class="titulo"><h1>${esc(nombreProg(P))}</h1><p class="sub ficha-sub">${[P.dias + " días", semTxt(P), P.autor, P.grupo === "ladder" ? "" : P.nivel].filter(Boolean).map(esc).join(" · ")}</p></div>
+    ${usar}
+    <details class="sobre"><summary>Cómo es y cómo progresar</summary><div>
+      <p>${esc(P.resumen)}</p><p>${esc(P.progresion)}</p>${P.aviso ? `<p class="mut">${esc(P.aviso)}</p>` : ""}<p class="mut">Fuente: ${esc(P.fuente)}.</p></div></details>
     <div class="titulo-row prog-sem"><div class="titulo"><h2>${esc(sem.n)}${n > 1 ? ` <span class="small mut mono">${w + 1} de ${n}</span>` : ""}</h2><p class="sub">${esc([sem.b, `${conEj} ${conEj === 1 ? "día" : "días"} de entrenamiento · ${series} series`].filter(Boolean).join(" · "))}</p></div>
       ${n > 1 ? `<button class="circ" data-progsem="-1" aria-label="Semana anterior" ${w === 0 ? "disabled" : ""}>${ICON.back}</button>
       <button class="circ" data-progsem="1" aria-label="Semana siguiente" ${w === n - 1 ? "disabled" : ""}>${ICON.next}</button>` : ""}</div>
-    ${sem.d.map(d => `<h3 class="dia-c">${esc(d.n)}</h3>${d.desc ? `<p class="small mut">${esc(d.desc)}</p>` : ""}
-      ${d.e.length ? `<div class="ejs">${d.e.map(ejCat).join("")}</div>` : d.desc ? "" : `<p class="small mut">Descanso.</p>`}`).join("")}
-    <p class="small mut fuente-c">Fuente: ${esc(P.fuente)}.</p>`;
+    ${sem.d.map(d => `<section class="dia-card"><h3>${esc(d.n)}</h3>${d.desc ? `<p class="dia-desc">${esc(d.desc)}</p>` : ""}
+      ${d.e.length ? d.e.map(ejCat).join("") : d.desc ? "" : `<p class="dia-desc">Descanso.</p>`}</section>`).join("")}`;
 }
+/* ── Usar un programa del catálogo: desde la semana que elijas, tus semanas pasan a ser las del programa
+   (se repite hasta la S52). Las semanas anteriores y lo anotado no cambian. Se guarda en el teléfono y en
+   programa.json de tu repositorio. ── */
+let BASE = null;  // las semanas del plan de la app (plan.json o plan-base.json), sin programa
+const LIFT_DE = [[/^(sentadilla|back squat|squat|barbell back squat|pause squat)$/i, "sentadilla"],
+  [/^(press banca|press de banca|bench|bench press|barbell bench press|bench (power|strength|hypertrophy)|pause barbell bench press)$/i, "banca"],
+  [/^(peso muerto|deadlift|barbell deadlift|touch-and-go deadlift)$/i, "peso_muerto"]];
+/* RPE para la app: «RPE 6–8» → 6–8, «RPE ~7–8 → ~9» → 7–9, «RIR 2» → 8, «RPE 8 (1.ª serie)» → 8. */
+function rpeDe(i) {
+  const t = String(i || "");
+  const rir = t.match(/RIR\s*([\d/]+)/);
+  const ns = rir ? rir[1].split("/").map(Number).filter(n => !isNaN(n)).map(n => 10 - n) : (t.match(/\d+(?:,\d+)?/g) || []).map(num).filter(x => x != null && x >= 4 && x <= 10);
+  if (!ns.length) return "";
+  const a = Math.min(...ns), b = Math.max(...ns);
+  return a === b ? f(a) : `${f(a)}–${f(b)}`;
+}
+function pctDe(c) {
+  const m = String(c || "").match(/(\d+(?:,\d+)?)(?:\s*–\s*(\d+(?:,\d+)?))?\s*%/); if (!m) return null;
+  const a = num(m[1]), b = m[2] ? num(m[2]) : a;
+  return {pct: Math.round((a + b) / 2 * 10) / 10, txt: m[2] ? `${f(a)}–${f(b)} %` : `${f(a)} %`, rango: !!m[2]};
+}
+const tipoPrograma = t => /descarga|deload/i.test(t) ? "desc" : /prueba|test|competencia|puesta a punto|taper/i.test(t) ? "test" : /intensif|pico|peak|fuerza/i.test(t) ? "int" : "acc";
+function itemsDePrograma(d) {
+  const usados = {};
+  const items = d.e.map(e => {
+    let id = slug(e.n) || "ejercicio"; usados[id] = (usados[id] || 0) + 1; if (usados[id] > 1) id += "_" + usados[id];
+    const p = pctDe(e.c), basico = (LIFT_DE.find(([re]) => re.test(String(e.n).replace(/^superset \d+:\s*/i, "").trim())) || [])[1], lift = p ? basico : null;
+    const notas = [p && !lift ? `Carga: ${p.txt} de tu máximo en este ejercicio.` : "", p && lift && p.rango ? `Carga: ${p.txt} de tu máximo; la app usa el punto medio.` : "",
+      e.i && !/^RPE [\d,–]+$/.test(e.i) ? `Intensidad del programa: ${e.i}.` : "", e.t ? `Técnica: ${e.t}.` : "", e.x || ""].filter(Boolean).join(" ");
+    const base = {n: e.n, sets: +e.s || 1, reps: String(e.r), rpe: rpeDe(e.i), slot: id, descanso: e.d || "", txt: notas, alt: e.sub && e.sub.length ? e.sub : null};
+    // un básico sin % (p. ej. The Muscle Ladder va por RPE) se anota como ese básico, para que sume a su Avance
+    return lift ? Object.assign(base, {k: "main", ex: lift, lift, pct: p.pct}) : Object.assign(base, {k: "acc", ex: basico || id});
+  });
+  if (!items.length && d.desc) items.push({k: "nota", n: d.n, txt: d.desc});
+  return items;
+}
+function semanasDePrograma(base, P) {
+  const plan = P.datos.plan, K = plan.length, desde = Math.max(1, Math.min(52, +P.desde || 1));
+  return base.map(s => {
+    if (s.w < desde) return s;
+    const i = (s.w - desde) % K, sem = plan[i], vuelta = Math.floor((s.w - desde) / K) + 1;
+    return {w: s.w, programa: true, tipo: tipoPrograma(`${sem.b || ""} ${sem.n}`), pos: "",
+      etiqueta: K > 1 ? `S${i + 1} del programa${sem.b ? " · " + sem.b : ""}` : "Semana tipo del programa", bloque: P.nombre, macro: P.nombre,
+      nota: `${P.nombre}${K > 1 ? ` · semana ${i + 1} de ${K}` : " · semana tipo"}${vuelta > 1 ? ` · vuelta ${vuelta}` : ""}.`,
+      dias: sem.d.map((d, j) => ({id: "d" + (j + 1), n: d.n, items: itemsDePrograma(d)}))};
+  });
+}
+function aplicarPlan() {
+  if (!BASE) BASE = DATA.semanas;
+  const P = st.programa;
+  W = P && P.datos && Array.isArray(P.datos.plan) && P.datos.plan.length ? semanasDePrograma(BASE, P) : BASE;
+  const s = W[ui.week - 1] || W[0]; ui.day = Math.max(0, Math.min(ui.day, s.dias.length - 1));
+}
+function usarPrograma(id, desde) {
+  const P = FICHAS[id]; if (!P || !P.plan) { toast("Abre el programa de nuevo y vuelve a intentar."); return; }
+  const nombre = nombreProg(P);
+  const anotado = desde === st.actual && LOG[desde] && Object.keys(LOG[desde]).length;
+  if (!confirm(`Desde la S${desde}, tu plan será «${nombre}». Las semanas anteriores y lo que anotaste no cambian.${anotado ? ` Lo que ya anotaste en la S${desde} queda en tu historial, pero no en los días del programa.` : ""}`)) return;
+  st.programa = {id, nombre, desde, desdeFecha: hoyIso(), datos: P};
+  dirty.programa = marca(); saveStore(); aplicarPlan(); pedirGuardado(0);
+  Object.assign(ui, {tab: "hoy", week: st.actual >= desde ? st.actual : desde, abierto: undefined, dayTouched: false});
+  ui.cat.prog = null; autoDia(); render(); window.scrollTo(0, 0);
+  toast(`Desde la S${desde} sigues «${nombre}».`);
+}
+function dejarPrograma() {
+  if (!st.programa || !confirm(`¿Dejar «${st.programa.nombre}» y volver al plan Exponential? Lo anotado no se borra.`)) return;
+  st.programa = null; dirty.programa = marca(); saveStore(); aplicarPlan(); pedirGuardado(0);
+  ui.cat.prog = null; render(); toast("Volviste al plan Exponential.");
+}
+/* Los 20 de The Muscle Ladder se llaman igual por tipo de división: el nombre lleva los días y el nivel. */
+const nombreProg = p => p.grupo !== "ladder" ? p.nombre
+  : `${p.nombre.replace(/^\d+ · /, "")} · ${p.dias} días · ${/poco tiempo/.test(p.meta) ? (p.nivel === "Avanzado" ? "avanzado, rápido" : "rápido") : String(p.nivel).toLowerCase()}`;
 function masProgramas() { return ui.cat.prog ? "" : catalogoHtml(); }
 /* La ficha deja una entrada en el historial: el botón «atrás» del teléfono vuelve al catálogo en vez de salir de la app. */
 function cerrarFicha() { const y = ui.cat.y; ui.cat.prog = null; renderMas(); if (ui.tab === "mas") window.scrollTo(0, y); }
@@ -1987,6 +2191,9 @@ document.addEventListener("click", async e => {
   const t = e.target.closest("button, [data-goweek]");
   if (!t) return;
   const ds = t.dataset;
+  if (ds.libro) { abrirVisor(Number(ds.libro)); return; }
+  if (ds.libroIr && visor) { visor.pag = Number(ds.libroIr); visor.zoom = 1; pintarVisor(); return; }
+  if ("libroCerrar" in ds) { cerrarVisor(); return; }
   if (ds.tab) { ui.tab = ds.tab; ui.dockCtl = false; render(); window.scrollTo(0, 0); return; }
   if (ds.inv) {
     const r = String(ui.inv.nuevo || "").trim();
@@ -2066,6 +2273,8 @@ document.addEventListener("click", async e => {
     try { if (!(history.state && history.state.ficha)) history.pushState({ficha: 1}, ""); } catch (err) {}
     renderMas(); window.scrollTo(0, 0); return;
   }
+  if (ds.usar) return usarPrograma(ds.usar, Number(ds.desde));
+  if ("dejar" in ds) return dejarPrograma();
   if ("progVolver" in ds) { if (history.state && history.state.ficha) history.back(); else cerrarFicha(); return; }
   if (ds.progsem) { ui.cat.sem = Math.max(0, ui.cat.sem + Number(ds.progsem)); renderMas(); const h = $(".prog-sem"); if (h) h.scrollIntoView({block: "start"}); return; }
   if (ds.tema) { tema.modo = ds.tema; guardarTema(); renderMas(); return; }
@@ -2163,9 +2372,11 @@ function mostrarPunto(el) {
   if (p && tip) tip.textContent = tipAvance(p, estimado);
 }
 document.addEventListener("click", e => { const h = e.target.closest && e.target.closest(".hit"); if (h) mostrarPunto(h); });
+document.addEventListener("click", e => { if (visor && LIBRO && e.target.closest && e.target.closest(".visor-pag canvas")) zoomVisor(e); });
 document.addEventListener("focusin", e => { if (e.target.classList && e.target.classList.contains("hit")) mostrarPunto(e.target); });
 document.addEventListener("change", e => {
   const t = e.target;
+  if (t.id === "libro-file") { const f = t.files && t.files[0]; t.value = ""; if (f) importarLibro(f); return; }
   if (t.id === "cat-file") { const f = t.files && t.files[0]; t.value = ""; if (f) importarCatalogo(f); return; }
   if ("avSel" in t.dataset) { ui.av = t.value; ui.avPt = null; renderAno(); return; }
   if (t.dataset.meta || t.dataset.metamed) { cambiarMeta(t.dataset.meta || t.dataset.metamed, t.value); renderAno(); return; }
@@ -2191,6 +2402,7 @@ document.addEventListener("change", e => {
   else if (t.id === "c-rpe") actualizarCalc();
 });
 document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && visor) { cerrarVisor(); return; }
   if (e.key === "Escape" && sheet) { cerrarSheet(); return; }
   // en Hoy, Enter en los kilos pasa a las reps; Enter en las reps guarda la serie
   const t = e.target;
@@ -2217,7 +2429,7 @@ document.addEventListener("visibilitychange", () => {
   if (conectado() && !sheet) enCola(pull);
 });
 window.addEventListener("pagehide", alSalir);
-window.addEventListener("popstate", () => { if (sheet) cerrarSheet(true); else if (ui.cat.prog) cerrarFicha(); });
+window.addEventListener("popstate", () => { if (visor) cerrarVisor(true); else if (sheet) cerrarSheet(true); else if (ui.cat.prog) cerrarFicha(); });
 
 /* ── inicio ── */
 (async function inicio() {
@@ -2231,7 +2443,8 @@ window.addEventListener("popstate", () => { if (sheet) cerrarSheet(true); else i
     $("#v-hoy").innerHTML = `<div class="titulo"><h1>No pude cargar el plan</h1><p class="sub">Abre la app con señal una vez para guardarla en el teléfono.</p></div>`;
     return;
   }
-  W = DATA.semanas; G = DATA.grupos; P64 = DATA.p64;
+  BASE = DATA.semanas; G = DATA.grupos; P64 = DATA.p64;
+  aplicarPlan();  // con un programa del catálogo, sus semanas desde la que elegiste
   ui.week = Math.max(1, Math.min(52, ui.week || st.actual));
   if (ui.week === st.actual) autoDia();
   const conHoja = restaurarBorrador();
