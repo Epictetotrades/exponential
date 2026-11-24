@@ -7,6 +7,7 @@
 /* ── versión: súbela en cada publicación (y la etiqueta vX.Y en git). Después de x.9 sigue (x+1).0:
    «1.10» se lee 1,1 y parece anterior a la 1.9. ── */
 const VERSIONES = [
+  {n: "3.3", nombre: "Más claro y registro firme", fecha: "24 nov 2026", txt: "«Próxima» va en una línea sin repetir el nombre, la tarjeta abierta muestra PLAN y ANTES alineados, y el aviso de vuelta completo sale solo en el primer ejercicio del día. El registro de uso sube al abrir, al salir y como mucho cada 5 minutos; si falla, queda en el teléfono hasta poder subirlo, no se duplica y anota también los errores de la app."},
   {n: "3.2", nombre: "Tus cargas, tu vez anterior", fecha: "24 nov 2026", txt: "Si el plan cambia el rango de reps de un accesorio, la carga sale de tu última serie llevada al rango nuevo (tabla p.64), no de una carga genérica. La tarjeta abierta muestra lo que hiciste la vez anterior. Hoy abre el día que sigue al último que entrenaste y salta los que llevas 3 semanas sin hacer. La vuelta tras una pausa parte de lo que hiciste tú."},
   {n: "3.1", nombre: "Vuelta y semana al día", fecha: "24 nov 2026", txt: "Si vuelves a un ejercicio tras 3 semanas o más, la tarjeta te muestra la última vez que lo hiciste y te sugiere un 10 % menos, con el calentamiento ajustado; luego ajustas por RPE (p.38). Al anotar en una semana posterior, esa pasa a ser tu semana actual, así el descanso empieza solo y el ejercicio siguiente se abre solo."},
   {n: "3.0", nombre: "Variantes que se quedan", fecha: "24 nov 2026", txt: "Lo que eliges en «Hiciste» vale al instante: la tarjeta de Hoy y la serie quedan con esa variante, que sigue las semanas siguientes hasta que vuelvas al del plan. Los extras se corrigen y al borrar puedes deshacer. El descanso empieza solo al guardar la serie; el anillo solo muestra el tiempo. La app anota lo que haces en uso/ de tu repositorio, para revisar qué mejorar."},
@@ -265,27 +266,39 @@ const weekPath = w => `semanas/w${w}.json`;
 const UKEY = () => "exp-uso-" + storeKey();
 let USO = null;  // se lee al primer uso, cuando ya se sabe de quién es el teléfono
 function uso() { if (USO === null) { try { USO = JSON.parse(localStorage.getItem(UKEY()) || "[]") || []; } catch (e) { USO = []; } } return USO; }
+let usoN = 0, usoSubido = 0, usoForzar = false, erroresSesion = 0;
+const USO_CADA = 5 * 60 * 1000;  // el registro sube al abrir, al salir y como mucho cada 5 min: no un commit por serie
 function registrar(a, d, mas) {
-  const x = Object.assign({t: Date.now(), a, d: String(d || ""), v: VERSIONES[0].n}, mas || {});
+  const t = Date.now(), x = Object.assign({id: t.toString(36) + "-" + (usoN++).toString(36) + Math.random().toString(36).slice(2, 5), t, a, d: String(d || "").slice(0, 500), v: VERSIONES[0].n}, mas || {});
   uso().push(x);
   if (USO.length > 3000) USO = USO.slice(-3000);
   try { localStorage.setItem(UKEY(), JSON.stringify(USO)); } catch (e) {}
 }
+function registrarError(m) {
+  if (erroresSesion >= 20 || !m || /ResizeObserver/.test(m)) return;
+  erroresSesion++;
+  try { registrar("error", m); } catch (e) {}
+}
+if (typeof window !== "undefined") {
+  window.addEventListener("error", e => registrarError(`${e.message || "error"} · ${(e.filename || "").split("/").pop()}:${e.lineno || 0}`));
+  window.addEventListener("unhandledrejection", e => registrarError("promesa: " + ((e.reason && (e.reason.message || e.reason)) || "sin motivo")));
+}
 const mesUso = t => { const f = new Date(t); return `${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, "0")}`; };
+const claveUso = x => x.id || x.t + x.a;
 async function subirUso() {
   const lote = uso().slice();
   if (!lote.length) return;
   for (const m of [...new Set(lote.map(x => mesUso(x.t)))]) {
     const del = lote.filter(x => mesUso(x.t) === m), path = `uso/${m}.json`;
     for (let intento = 0; ; intento++) {
-      const r = await getFile(path), ya = (r.data && r.data.e) || [], vistos = new Set(ya.map(x => x.t + x.a));
-      const todo = ya.concat(del.filter(x => !vistos.has(x.t + x.a))).sort((p, q) => p.t - q.t);
+      const r = await getFile(path), ya = (r.data && Array.isArray(r.data.e)) ? r.data.e : [], vistos = new Set(ya.map(claveUso));
+      const todo = ya.concat(del.filter(x => !vistos.has(claveUso(x)))).sort((p, q) => p.t - q.t);
       try { await putFile(path, {e: todo, v: 1}, r.sha); break; }
       catch (e) { if (!e.conflict || intento >= 2) throw e; }
     }
   }
-  const subidos = new Set(lote.map(x => x.t + x.a));
-  USO = USO.filter(x => !subidos.has(x.t + x.a));
+  const subidos = new Set(lote.map(claveUso));
+  USO = USO.filter(x => !subidos.has(claveUso(x)));
   try { localStorage.setItem(UKEY(), JSON.stringify(USO)); } catch (e) {}
 }
 
@@ -299,12 +312,13 @@ function pedirGuardado(ms = 700) {
   clearTimeout(flushTimer);
   flushTimer = setTimeout(() => enCola(flush), ms);
 }
-const pendientes = () => (uso().length ? 1 : 0) + (dirty.estado ? 1 : 0) + (dirty.prog ? 1 : 0) + (dirty.perfil ? 1 : 0) + (dirty.programa ? 1 : 0) + Object.keys(dirty.weeks).length;
+const pendientes = () => (dirty.estado ? 1 : 0) + (dirty.prog ? 1 : 0) + (dirty.perfil ? 1 : 0) + (dirty.programa ? 1 : 0) + Object.keys(dirty.weeks).length;
 function errorDeRed(e) { return e instanceof TypeError || !navigator.onLine; }
 
 async function flush() {
   if (!conectado()) return;
-  if (!pendientes()) { setSync("ok", "Todo guardado en tu cuenta"); return; }
+  const conUso = uso().length > 0 && (usoForzar || Date.now() - usoSubido > USO_CADA);
+  if (!pendientes() && !conUso) { setSync("ok", "Todo guardado en tu cuenta"); return; }
   if (!navigator.onLine) { setSync("offline", "Sin señal: guardado en el teléfono; se sube al volver"); return; }
   setSync("saving", "Guardando…");
   try {
@@ -346,7 +360,10 @@ async function flush() {
       if (dirty.weeks[w] === v) delete dirty.weeks[w];
     }
     if (falloGuardado) { registrar("guardado", `subido tras ${Math.round((Date.now() - falloGuardado.t) / 1000)} s (${falloGuardado.m})`); falloGuardado = null; }
-    try { await subirUso(); } catch (e) {}
+    if (conUso) {
+      try { await subirUso(); usoSubido = Date.now(); usoForzar = false; }
+      catch (e) { try { localStorage.setItem("exp-uso-fallo", JSON.stringify({t: Date.now(), m: String(e.message || e)})); } catch (x) {} }
+    }
     lastSync = Date.now();
     saveStore();
     setSync("ok", "Guardado en tu cuenta");
@@ -409,7 +426,8 @@ async function pull() {
     saveStore();
     if (!ui.dayTouched) { ui.week = st.actual; autoDia(); }
     if (!sheet && !editando()) render();
-    if (pendientes()) await flush(); else setSync("ok", "Al día con tu cuenta");
+    if (uso().length) usoForzar = true;
+    if (pendientes() || uso().length) await flush(); else setSync("ok", "Al día con tu cuenta");
   } catch (err) {
     if (errorDeRed(err)) setSync("offline", "Sin señal: usando lo guardado en el teléfono");
     else setSync("error", err.message);
@@ -568,11 +586,14 @@ function cargaVuelta(s, it, base) {
 }
 function antesHtml(s, it, key) {
   const a = antesDe(s.w, key, it);
-  return /^S\d+ · /.test(a) && !a.includes("(") ? `<span class="antes"><span class="k">ANTES</span> ${esc(a)}</span>` : "";
+  return /^S\d+ · /.test(a) && !a.includes("(") ? `<span class="k">ANTES</span><span class="v antes">${esc(a)}</span>` : "";
 }
-function vueltaHtml(s, it, prev) {
-  if (s.w < st.actual || registrado(prev) || !["main", "acc", "amrap", "single"].includes(it.k)) return "";
+const VUELTA_K = ["main", "acc", "amrap", "single"];
+function vueltaHtml(s, it, prev, d) {
+  if (s.w < st.actual || registrado(prev) || !VUELTA_K.includes(it.k)) return "";
   const v = vueltaDe(it); if (!v) return "";
+  const log = LOG[s.w] || {}, primero = d && itemsEj(d).find(x => VUELTA_K.includes(x.k) && !registrado(log[claveDe(d.id, x)]) && vueltaDe(x));
+  if (d && primero && primero !== it) return `<span class="vuelta corta">Vuelves tras ${Math.round(v.dias / 7)} semanas · última: ${esc(v.txt)}</span>`;
   const f = new Date(v.t), fecha = `${f.getDate()} ${["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"][f.getMonth()]}`;
   return `<span class="vuelta"><b>Vuelves tras ${Math.round(v.dias / 7)} semanas.</b> Última vez, el ${esc(fecha)}: ${esc(v.txt)}. ${v.kg ? "Empieza un 10 % más liviano y" : "Empieza con menos reps y"} ajusta por RPE <span class="pg">p.38</span></span>`;
 }
@@ -866,7 +887,7 @@ function feedbackHtml(s, d, it, prev) {
       } else if (prev.sets.some(x => x.rpe != null)) fb = `<p class="hint">Con tanto margen hasta el fallo, el máximo no se puede estimar bien (p.115, p.120). Para estimarlo sirve una serie de 1–3 reps a RPE 8–9 (p.118).</p>`;
       else fb = `<p class="hint">Anota el RPE de alguna serie para estimar tu máximo.</p>`;
     }
-    if (it.k === "acc" && PROG[h.id] && PROG[h.id].w === s.w) fb = `<div class="prox"><span class="k">PRÓXIMA</span><span>Próxima vez en ${esc(h.n)}: <b class="mono">${kg(PROG[h.id].next)}</b> · ${esc(PROG[h.id].motivo)}.</span></div>`;
+    if (it.k === "acc" && PROG[h.id] && PROG[h.id].w === s.w) fb = `<div class="prox"><span class="k">PRÓXIMA</span><span>${h.id !== it.ex ? esc(h.n) + ": " : ""}<b class="mono">${kg(PROG[h.id].next)}</b> · ${esc(PROG[h.id].motivo)}.</span></div>`;
   }
   const nc = (CLAUDE[s.w] || {})[claveDe(d.id, it)];
   if (nc && nc.txt) fb += `<div class="claude"><span class="k">CLAUDE</span><p>${esc(nc.txt)}</p></div>`;
@@ -886,7 +907,7 @@ function itemRow(s, d, it) {
     <button class="ex" data-abrir="${esc(key)}" aria-expanded="false">
       <span class="ex-h"><b class="nombre">${esc(conMeta(it.n))}</b><span class="chip ${cls}">${txt}</span></span>
       <span class="kv"><span class="k">PLAN</span><span class="v">${esc(planTxt(s, it))}</span>${hecho ? `<span class="k">HECHO</span><span class="v fuerte">${esc(hecho)}</span>` : ""}</span>
-      ${vueltaHtml(s, it, prev)}
+      ${vueltaHtml(s, it, prev, d)}
       ${prev && prev.com ? `<span class="cita">“${esc(prev.com)}”</span>` : ""}
     </button>${extra}</div></div>`;
   const sets = prev && prev.sets && !prev.omitido ? prev.sets : [];
@@ -907,8 +928,7 @@ function itemRow(s, d, it) {
     <div class="tarjeta">
       <button class="ex" data-abrir="${esc(key)}" aria-expanded="true">
         <span class="ex-h"><b class="nombre">${esc(hechoNuevo(prev, it).id !== it.ex ? hechoNuevo(prev, it).n : conMeta(it.n))}</b><span class="tag">${esc(tags)}</span></span>${hechoNuevo(prev, it).id !== it.ex ? `<span class="hint">En lugar de ${esc(nombrePlan(it))}. Para volver, elige el del plan en «Hiciste».</span>` : ""}
-        <span class="v">${esc(planTxt(s, it))}</span>
-        ${vueltaHtml(s, it, prev) || antesHtml(s, it, key)}
+        ${(vh => `<span class="kv"><span class="k">PLAN</span><span class="v">${esc(planTxt(s, it))}</span>${vh ? "" : antesHtml(s, it, key)}</span>${vh}`)(vueltaHtml(s, it, prev, d))}
       </button>
       ${calor}
       <div class="scs">${chips}</div>
@@ -2572,7 +2592,8 @@ setInterval(() => {
 }, 90000);
 function alSalir() {
   saveStore(); guardarBorrador();
-  if (conectado() && pendientes() && navigator.onLine) enCola(flush);
+  if (uso().length) usoForzar = true;
+  if (conectado() && (pendientes() || uso().length) && navigator.onLine) enCola(flush);
 }
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return alSalir();
@@ -2604,7 +2625,7 @@ window.addEventListener("popstate", () => { if (visor) cerrarVisor(true); else i
   if (conHoja) { marcarHoja(); renderSheet(true); toast("Recuperé lo que estabas anotando."); }
   else if (edit && edit.tocado) toast("Recuperé la serie que estabas anotando.");
   if (descansoT) tickDescanso();
-  registrar("abrir", `S${st.actual} · ${navigator.onLine === false ? "sin señal" : "con señal"}`);
+  registrar("abrir", `S${st.actual} · ${navigator.onLine === false ? "sin señal" : "con señal"} · ${typeof matchMedia !== "undefined" && matchMedia("(display-mode: standalone)").matches ? "instalada" : "navegador"}${conectado() ? "" : " · sin cuenta"}`);
   setSync(conectado() ? (navigator.onLine ? "saving" : "offline") : "local", conectado() ? "" : "Guardado solo en este teléfono");
   if (conectado()) enCola(pull);
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});

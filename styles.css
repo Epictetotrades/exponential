@@ -172,7 +172,7 @@ p { margin: 0 0 10px; }
 .chip.cam { background: var(--mut); border-color: var(--mut); color: var(--bg); }
 .chip.fal { border: 1px dashed var(--acc); color: var(--acc); }
 .chip.omi { border: 1px dashed var(--faint); }
-.prox { display: grid; grid-template-columns: 54px minmax(0, 1fr); align-items: baseline; font-size: 12.5px; line-height: 1.45; }
+.prox { display: grid; grid-template-columns: 54px minmax(0, 1fr); align-items: baseline; font-size: 14px; line-height: 1.45; }
 .prox .k { color: var(--acc); }
 details.more summary { list-style: none; cursor: pointer; font: 14px/1.6 var(--sans); color: var(--mut); min-height: 32px; display: flex; align-items: center; }
 details.more summary::-webkit-details-marker { display: none; }
@@ -516,6 +516,6 @@ body.con-dock .toast { bottom: calc(var(--nav-h) + var(--dock-h) + var(--safe-b)
 .vuelta { display: block; margin-top: 8px; padding: 8px 10px; border-left: 2px solid var(--acc); background: var(--bg2, transparent); font-size: 14.5px; line-height: 1.45; color: var(--tx2); }
 .vuelta b { color: var(--tx); font-weight: 600; }
 
-/* la vez anterior, en la tarjeta abierta */
-.antes { display: block; margin-top: 4px; font-family: var(--mono, monospace); font-size: 14px; color: var(--tx2); }
-.antes .k { font-size: 11px; letter-spacing: .08em; color: var(--mut); margin-right: 6px; }
+/* la vez anterior, en la tarjeta abierta: mismo tamaño que el plan, más suave */
+.tarjeta .kv .v.antes, .kv .v.antes { color: var(--mut); }
+.vuelta.corta { border-left: 0; padding: 0; background: none; margin-top: 6px; font-size: 14px; color: var(--acc); }
