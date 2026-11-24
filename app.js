@@ -7,6 +7,7 @@
 /* ── versión: súbela en cada publicación (y la etiqueta vX.Y en git). Después de x.9 sigue (x+1).0:
    «1.10» se lee 1,1 y parece anterior a la 1.9. ── */
 const VERSIONES = [
+  {n: "3.4", nombre: "Menos ruido", fecha: "24 nov 2026", txt: "La barra inferior muestra el nombre completo del ejercicio, en dos líneas si hace falta. Los ejercicios hechos ya no muestran «Detalles». La explicación del calentamiento sale las 3 primeras veces; después quedan solo los botones."},
   {n: "3.3", nombre: "Más claro y registro firme", fecha: "24 nov 2026", txt: "«Próxima» va en una línea sin repetir el nombre, la tarjeta abierta muestra PLAN y ANTES alineados, y el aviso de vuelta completo sale solo en el primer ejercicio del día. El registro de uso sube al abrir, al salir y como mucho cada 5 minutos; si falla, queda en el teléfono hasta poder subirlo, no se duplica y anota también los errores de la app."},
   {n: "3.2", nombre: "Tus cargas, tu vez anterior", fecha: "24 nov 2026", txt: "Si el plan cambia el rango de reps de un accesorio, la carga sale de tu última serie llevada al rango nuevo (tabla p.64), no de una carga genérica. La tarjeta abierta muestra lo que hiciste la vez anterior. Hoy abre el día que sigue al último que entrenaste y salta los que llevas 3 semanas sin hacer. La vuelta tras una pausa parte de lo que hiciste tú."},
   {n: "3.1", nombre: "Vuelta y semana al día", fecha: "24 nov 2026", txt: "Si vuelves a un ejercicio tras 3 semanas o más, la tarjeta te muestra la última vez que lo hiciste y te sugiere un 10 % menos, con el calentamiento ajustado; luego ajustas por RPE (p.38). Al anotar en una semana posterior, esa pasa a ser tu semana actual, así el descanso empieza solo y el ejercicio siguiente se abre solo."},
@@ -893,6 +894,16 @@ function feedbackHtml(s, d, it, prev) {
   if (nc && nc.txt) fb += `<div class="claude"><span class="k">CLAUDE</span><p>${esc(nc.txt)}</p></div>`;
   return fb;
 }
+/* La explicación del calentamiento sale las 3 primeras veces que lo ves; después quedan solo los botones. */
+function calorAyuda(id) {
+  let v = [];
+  try { v = JSON.parse(localStorage.getItem("exp-calor-ayuda") || "[]") || []; } catch (e) { return true; }
+  if (v.includes(id)) return true;
+  if (v.length >= 3) return false;
+  v.push(id);
+  try { localStorage.setItem("exp-calor-ayuda", JSON.stringify(v)); } catch (e) {}
+  return true;
+}
 function itemRow(s, d, it) {
   if (it.k === "nota") return `<div class="paso nota"><div class="riel"><i class="nodo"></i><s></s></div><div class="cuerpo"><b>${esc(it.n)}</b><span>${esc(it.txt)}</span></div></div>`;
   if (it.k === "pot") return `<div class="paso pot"><div class="riel"><i class="nodo"></i><s></s></div><div class="cuerpo"><span class="tag">Potencia · descanso ${descanso(it)}</span><b class="nombre">${esc(it.n)}</b><span class="v">${esc(planTxt(s, it))}</span>${it.txt ? `<span class="hint">${esc(it.txt)}</span>` : ""}</div></div>`;
@@ -901,7 +912,7 @@ function itemRow(s, d, it) {
   const h = registrado(prev) ? hechoDe(prev, it) : null;
   const hecho = !h ? "" : prev.omitido ? "No lo hiciste" : (h.id !== it.ex ? h.n + ": " : "") + resumen(prev.sets);
   const det = detalleTxt(s, it);
-  const extra = feedbackHtml(s, d, it, prev) + (det.length ? `<details class="more"><summary>Detalles</summary><div>${det.map(esc).join("<br>")}</div></details>` : "");
+  const extra = feedbackHtml(s, d, it, prev) + (det.length && !(registrado(prev) && ui.abierto !== key) ? `<details class="more"><summary>Detalles</summary><div>${det.map(esc).join("<br>")}</div></details>` : "");
   const abierto = ui.abierto === key && edit && edit.key === key && edit.w === s.w;
   if (!abierto) return `<div class="paso ${cls}"><div class="riel"><i class="nodo"></i><s></s></div><div class="cuerpo">
     <button class="ex" data-abrir="${esc(key)}" aria-expanded="false">
@@ -918,7 +929,7 @@ function itemRow(s, d, it) {
   const listos = ui.calor[key] || [];
   const calor = pasos.length ? `<div class="calor"><span class="k acc">Calentamiento · ${listos.length} de ${pasos.length} <span class="pg">p.224</span></span>
       <div class="scs">${pasos.map((t, i) => `<button class="sc ${listos.includes(i) ? "hecha" : "nueva"}" data-calor="${esc(key)}" data-i="${i}" aria-pressed="${listos.includes(i)}">${listos.includes(i) ? ICON.ok : ""}${esc(t)}</button>`).join("")}</div>
-      <span class="hint">Sube por el 50 al 90 % de tu carga de trabajo. Toca cada uno al hacerlo; no se guarda como serie.</span></div>` : "";
+      ${calorAyuda(s.w + key) ? `<span class="hint">Sube por el 50 al 90 % de tu carga de trabajo. Toca cada uno al hacerlo; no se guarda como serie.</span>` : ""}</div>` : "";
   const lados = it.lado ? `<div class="seg lado" style="--n:2;margin-top:0" role="group" aria-label="Pierna">${[["izq", "Izquierda"], ["der", "Derecha"]].map(([v, n]) => `<button data-lado="${v}" aria-pressed="${edit.lado === v}">${n}</button>`).join("")}</div>
       ${sets.some(x => x.lado) ? `<span class="hint">Esta semana ·${["izq", "der"].map(l => `${l === "izq" ? "izquierda" : "derecha"}: ${sets.filter(x => x.lado === l).map(x => x.reps).join(", ") || "—"}`).join(" · ")} reps</span>` : ""}` : "";
   const disc = barra && discos(edit.kg) ? `<div class="discos">Por lado: <b class="mono" id="discos-v">${esc(discos(edit.kg))}</b> · barra de 20 kg</div>` : "";
