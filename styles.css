@@ -475,6 +475,8 @@ label.link-btn { cursor: pointer; }
   z-index: 60; background: var(--tx); color: var(--bg); padding: 10px 16px; border-radius: 20px;
   font-size: 14px; font-weight: 500; box-shadow: 0 6px 24px var(--sombra); max-width: calc(100% - 40px);
 }
+.toast.con-accion { width: max-content; display: flex; align-items: center; gap: 14px; padding: 6px 6px 6px 16px; }
+.toast-btn { background: none; border: 0; color: var(--bg); font: inherit; font-weight: 700; text-decoration: underline; padding: 8px 10px; cursor: pointer; }
 body.con-dock .toast { bottom: calc(var(--nav-h) + var(--dock-h) + var(--safe-b) + 24px); }
 
 /* ── entrada: bienvenida y punto de partida, sin menú, cinta ni barra ── */
@@ -507,3 +509,5 @@ body.con-dock .toast { bottom: calc(var(--nav-h) + var(--dock-h) + var(--safe-b)
 .visor-ayuda { margin: 0; padding: 8px 16px calc(8px + var(--safe-b)); font-size: 14px; color: var(--mut); text-align: center; }
 .visor-msg { padding: 20px 16px; }
 .pg-t { color: var(--acc); }
+
+.x-acc { display: flex; gap: 6px; flex-shrink: 0; }

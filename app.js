@@ -7,6 +7,7 @@
 /* ── versión: súbela en cada publicación (y la etiqueta vX.Y en git). Después de x.9 sigue (x+1).0:
    «1.10» se lee 1,1 y parece anterior a la 1.9. ── */
 const VERSIONES = [
+  {n: "3.0", nombre: "Variantes que se quedan", fecha: "24 nov 2026", txt: "Lo que eliges en «Hiciste» vale al instante: la tarjeta de Hoy y la serie quedan con esa variante, que sigue las semanas siguientes hasta que vuelvas al del plan. Los extras se corrigen y al borrar puedes deshacer. El descanso empieza solo al guardar la serie; el anillo solo muestra el tiempo. La app anota lo que haces en uso/ de tu repositorio, para revisar qué mejorar."},
   {n: "2.9", nombre: "Descanso más sutil", fecha: "23 oct 2026", txt: "La barra del descanso se ve solo en Hoy. Un toque al anillo inicia el descanso y otro lo para, sin menú. En las otras pestañas el descanso sigue corriendo y al terminar te avisa."},
   {n: "2.8", nombre: "Usar un programa", fecha: "23 oct 2026", txt: "En Más › Programas, «Usar desde la próxima semana» (o desde esta) convierte el programa en tu plan: Hoy, Semana y Año lo siguen y se repite hasta la S52. Lo anterior no cambia y puedes dejarlo cuando quieras. Las fichas muestran cada día en su recuadro y los nombres ya no se repiten. Los textos que se leen son más grandes y oscuros, y cada «p.64» abre esa página del libro: el PDF se abre una vez y queda en el teléfono."},
   {n: "2.7", nombre: "Avance de todo y metas tuyas", fecha: "17 oct 2026", txt: "Avance muestra cualquier ejercicio que hayas anotado (los básicos con su máximo estimado; los demás, tu mejor serie de cada semana). Las metas de banca y de medidas se cambian en Año, y Medidas quedó en una sola lista."},
@@ -257,9 +258,38 @@ function leerInvitacion() {
 }
 const weekPath = w => `semanas/w${w}.json`;
 
+/* ── registro de uso: cada acción que cambia tus datos (no cada toque), para revisar qué cuesta o falla.
+   Se guarda en el teléfono y se sube a uso/AAAA-MM.json de tu repositorio, junto a tu registro. ── */
+const UKEY = () => "exp-uso-" + storeKey();
+let USO = null;  // se lee al primer uso, cuando ya se sabe de quién es el teléfono
+function uso() { if (USO === null) { try { USO = JSON.parse(localStorage.getItem(UKEY()) || "[]") || []; } catch (e) { USO = []; } } return USO; }
+function registrar(a, d, mas) {
+  const x = Object.assign({t: Date.now(), a, d: String(d || ""), v: VERSIONES[0].n}, mas || {});
+  uso().push(x);
+  if (USO.length > 3000) USO = USO.slice(-3000);
+  try { localStorage.setItem(UKEY(), JSON.stringify(USO)); } catch (e) {}
+}
+const mesUso = t => { const f = new Date(t); return `${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, "0")}`; };
+async function subirUso() {
+  const lote = uso().slice();
+  if (!lote.length) return;
+  for (const m of [...new Set(lote.map(x => mesUso(x.t)))]) {
+    const del = lote.filter(x => mesUso(x.t) === m), path = `uso/${m}.json`;
+    for (let intento = 0; ; intento++) {
+      const r = await getFile(path), ya = (r.data && r.data.e) || [], vistos = new Set(ya.map(x => x.t + x.a));
+      const todo = ya.concat(del.filter(x => !vistos.has(x.t + x.a))).sort((p, q) => p.t - q.t);
+      try { await putFile(path, {e: todo, v: 1}, r.sha); break; }
+      catch (e) { if (!e.conflict || intento >= 2) throw e; }
+    }
+  }
+  const subidos = new Set(lote.map(x => x.t + x.a));
+  USO = USO.filter(x => !subidos.has(x.t + x.a));
+  try { localStorage.setItem(UKEY(), JSON.stringify(USO)); } catch (e) {}
+}
+
 let chain = Promise.resolve();
 const enCola = fn => (chain = chain.catch(() => {}).then(fn));
-let flushTimer = null;
+let flushTimer = null, falloGuardado = null;
 function pedirGuardado(ms = 700) {
   saveStore();
   if (!conectado()) { setSync("local", "Guardado en este teléfono"); return; }
@@ -267,7 +297,7 @@ function pedirGuardado(ms = 700) {
   clearTimeout(flushTimer);
   flushTimer = setTimeout(() => enCola(flush), ms);
 }
-const pendientes = () => (dirty.estado ? 1 : 0) + (dirty.prog ? 1 : 0) + (dirty.perfil ? 1 : 0) + (dirty.programa ? 1 : 0) + Object.keys(dirty.weeks).length;
+const pendientes = () => (uso().length ? 1 : 0) + (dirty.estado ? 1 : 0) + (dirty.prog ? 1 : 0) + (dirty.perfil ? 1 : 0) + (dirty.programa ? 1 : 0) + Object.keys(dirty.weeks).length;
 function errorDeRed(e) { return e instanceof TypeError || !navigator.onLine; }
 
 async function flush() {
@@ -291,7 +321,7 @@ async function flush() {
     if (dirty.estado) {
       const v = dirty.estado;
       const r = await getFile("estado.json");
-      await putFile("estado.json", Object.assign({rm: st.rm, jalon: st.jalon, actual: st.actual, peso: st.peso || "", medidas: st.medidas || []}, st.metas ? {metas: st.metas} : {}), r.sha);
+      await putFile("estado.json", Object.assign({rm: st.rm, jalon: st.jalon, actual: st.actual, peso: st.peso || "", medidas: st.medidas || []}, st.metas ? {metas: st.metas} : {}, st.variantes ? {variantes: st.variantes} : {}), r.sha);
       if (dirty.estado === v) dirty.estado = false;
     }
     if (dirty.prog) {
@@ -313,11 +343,15 @@ async function flush() {
       }
       if (dirty.weeks[w] === v) delete dirty.weeks[w];
     }
+    if (falloGuardado) { registrar("guardado", `subido tras ${Math.round((Date.now() - falloGuardado.t) / 1000)} s (${falloGuardado.m})`); falloGuardado = null; }
+    try { await subirUso(); } catch (e) {}
     lastSync = Date.now();
     saveStore();
     setSync("ok", "Guardado en tu cuenta");
   } catch (e) {
     saveStore();
+    const m = errorDeRed(e) ? "sin señal" : "error: " + e.message;
+    if (!falloGuardado) { falloGuardado = {t: Date.now(), m}; registrar("guardado", m); }
     if (errorDeRed(e)) setSync("offline", "Sin señal: guardado en el teléfono; se sube al volver");
     else setSync("error", e.message);
   }
@@ -361,6 +395,7 @@ async function pull() {
       if (v.peso != null) st.peso = v.peso;
       if (Array.isArray(v.medidas)) st.medidas = v.medidas;
       if (v.metas && typeof v.metas === "object") st.metas = v.metas;
+      if (v.variantes && typeof v.variantes === "object") st.variantes = v.variantes;
     }
     const p = await getFile("prog.json");
     if (p.data) {
@@ -482,9 +517,19 @@ function mezclar(a, b) {
 }
 const opcionesHecho = it => [[it.ex, nombrePlan(it) + " (plan)"]].concat(ALT[it.ex] ? ALT[it.ex].op : [], it.alt ? it.alt.map(n => [slug(n), n]) : []);
 const hechoDe = (prev, it) => prev && prev.hecho ? prev.hecho : {id: it.ex, n: nombrePlan(it)};
+/* Lo que harás: lo ya anotado, o la variante que elegiste para este ejercicio (sigue hasta que vuelvas al plan). */
+const hechoNuevo = (prev, it) => registrado(prev) && prev.hecho ? prev.hecho : (st.variantes || {})[it.ex] || {id: it.ex, n: nombrePlan(it)};
+const nombreHoy = (prev, it) => { const h = hechoNuevo(prev, it); return h.id !== it.ex ? h.n : nombrePlan(it); };
 const registrado = prev => !!(prev && (prev.omitido || (prev.sets && prev.sets.length)));
+/* Variante sin progresión propia: los kilos de tu última serie con ella (carga por RPE si es la primera vez). */
+function ultimoKg(hid) {
+  for (const w of Object.keys(LOG).map(Number).sort((a, b) => b - a))
+    for (const e of Object.values(LOG[w] || {}))
+      if (e && e.hecho && e.hecho.id === hid && e.sets && e.sets.length) return e.sets[e.sets.length - 1].kg || "";
+  return "";
+}
 function cargaSugerida(s, it, hid) {
-  if (hid && hid !== it.ex) { const p = PROG[hid]; return p ? (p.next || p.kg || "") : ""; }
+  if (hid && hid !== it.ex && it.k !== "main") { const p = PROG[hid]; return p ? (p.next || p.kg || "") : ultimoKg(hid); }  // en un básico, la variante parte del % del plan y se ajusta por RPE
   let planKg = "";
   if (it.k === "main") planKg = r25(rmDe(s.w, it.lift) * it.pct / 100);
   else if (it.k === "amrap") planKg = cargaAmrap(s);
@@ -716,7 +761,7 @@ function nuevoEdit(w, key, idx) {
   const ref = sets[i] || sets[sets.length - 1];
   const ultimo = sets.length ? sets[sets.length - 1].lado : null;  // por lado: alterna, empezando por la izquierda (tu plan)
   return {w, key, idx: i,
-    kg: ref ? ref.kg : (cargaSugerida(s, it, hechoDe(prev, it).id) || ""),
+    kg: ref ? ref.kg : (cargaSugerida(s, it, hechoNuevo(prev, it).id) || ""),
     reps: ref ? ref.reps : it.k === "single" ? 1 : it.k === "amrap" ? "" : rango(it.reps)[0],
     rpe: sets[i] && sets[i].rpe != null ? sets[i].rpe : null,
     lado: it.lado ? (sets[i] ? sets[i].lado || "izq" : ultimo === "izq" ? "der" : "izq") : null};
@@ -789,7 +834,7 @@ function itemRow(s, d, it) {
   return `<div class="paso abierto ${cls}"><div class="riel"><i class="nodo"></i><s></s></div><div class="cuerpo">
     <div class="tarjeta">
       <button class="ex" data-abrir="${esc(key)}" aria-expanded="true">
-        <span class="ex-h"><b class="nombre">${esc(conMeta(it.n))}</b><span class="tag">${esc(tags)}</span></span>
+        <span class="ex-h"><b class="nombre">${esc(hechoNuevo(prev, it).id !== it.ex ? hechoNuevo(prev, it).n : conMeta(it.n))}</b><span class="tag">${esc(tags)}</span></span>${hechoNuevo(prev, it).id !== it.ex ? `<span class="hint">En lugar de ${esc(nombrePlan(it))}. Para volver, elige el del plan en «Hiciste».</span>` : ""}
         <span class="v">${esc(planTxt(s, it))}</span>
       </button>
       ${calor}
@@ -818,7 +863,7 @@ function renderHoy() {
     ${edit && typeof navigator !== "undefined" && navigator.wakeLock ? `<div class="ctx pantalla"><span>Pantalla encendida mientras entrenas</span><button class="switch" role="switch" data-pantalla aria-checked="${pantallaOn()}" aria-label="Pantalla encendida mientras entrenas"><i></i></button></div>` : ""}
     ${ncDia && ncDia.txt ? `<div class="claude"><span class="k">CLAUDE · ESTE DÍA</span><p>${esc(ncDia.txt)}</p></div>` : ""}
     <div class="linea">${d.items.map(it => itemRow(s, d, it)).join("") || '<p class="mut">Día libre o de movilidad.</p>'}</div>
-    ${extras.length ? `<h2>Extras</h2><div class="lista">${extras.map((x, i) => `<div class="row"><div class="ex-h"><b class="nombre">${esc(x.n)}</b><button class="btn quiet chico" data-delx="${d.id}" data-i="${i}">Borrar</button></div>
+    ${extras.length ? `<h2>Extras</h2><div class="lista">${extras.map((x, i) => `<div class="row"><div class="ex-h"><b class="nombre">${esc(x.n)}</b><span class="x-acc"><button class="btn quiet chico" data-editx="${d.id}" data-i="${i}">Corregir</button><button class="btn quiet chico" data-delx="${d.id}" data-i="${i}">Borrar</button></span></div>
       <div class="kv"><span class="k">HECHO</span><span class="v fuerte">${esc(resumen(x.sets))}</span></div></div>`).join("")}</div>` : ""}
     <div class="acciones"><button class="btn ghost" data-extra-open="${d.id}">Añadir ejercicio extra</button></div>
     <label class="fl notas">Notas del día<textarea class="inp" rows="3" data-dn="${d.id}" placeholder="Sueño, cansancio, ${esTuyo() ? "tenis" : "deporte"} ese día, cambios de orden… (se guarda solo)">${esc(nd && nd.txt ? nd.txt : "")}</textarea></label>`;
@@ -840,10 +885,12 @@ function guardarSerie() {
   if (!(reps > 0)) { toast("Anota las reps de la serie."); return; }
   const prev = (LOG[w] || {})[key];
   const sets = prev && prev.sets && !prev.omitido ? prev.sets.slice() : [];
-  const i = Math.min(edit.idx, sets.length);
+  const i = Math.min(edit.idx, sets.length), antes = sets[i] ? serieTxt(sets[i]) : null;
   sets[i] = {kg: kgv ?? 0, reps, rpe: edit.rpe == null ? null : +edit.rpe};
+  const ultima = uso().filter(x => x.a === "serie").pop(), pausa = ultima && !antes ? Math.round((Date.now() - ultima.t) / 1000) : 0;
+  registrar("serie", `${antes ? "corrige" : "nueva"} · S${w} ${key} · ${nombreHoy(prev, it)} · serie ${i + 1}: ${antes ? antes + " → " : ""}${serieTxt(sets[i])}`, pausa && pausa < 1800 ? {pausa} : null);
   if (it.lado) sets[i].lado = edit.lado || "izq";
-  const entry = {v: 2, t: Date.now(), plan: {id: it.ex, n: nombrePlan(it)}, hecho: hechoDe(prev, it), sets};
+  const entry = {v: 2, t: Date.now(), plan: {id: it.ex, n: nombrePlan(it)}, hecho: hechoNuevo(prev, it), sets};
   if (prev && prev.com) entry.com = prev.com;
   guardarEntrada(w, key, entry, it);
   if (w === st.actual) iniciarDescanso(segundosDescanso(descanso(it)), nombrePlan(it));
@@ -1137,8 +1184,8 @@ function avanceHtml() {
 }
 
 /* ── barra inferior: descanso y serie en curso ──
-   Solo en Hoy: el anillo cuenta el descanso y el botón guarda la serie abierta. Un toque al anillo inicia el
-   descanso y otro lo para. En las otras pestañas no se ve, pero el descanso sigue y avisa al terminar. */
+   Solo en Hoy: el anillo solo muestra el descanso, que empieza al guardar la serie; el botón guarda la serie
+   abierta. En las otras pestañas no se ve, pero el descanso sigue y avisa al terminar. */
 const TKEY = "exp-descanso";
 const ANILLO = 138.2;  // 2πr, r = 22
 let descansoT = null, reloj = null, audioCtx = null;
@@ -1193,9 +1240,9 @@ function tickDescanso() {
 function anilloHtml(plan) {
   const r = quedan(), hecho = descansoT ? Math.min(1, Math.max(0, 1 - r / (descansoT.total || r || 1))) : 0;
   const txt = descansoT ? mmss(Math.max(0, r)) : plan ? plan.replace(" min", "′").replace(/ en par$/, "") : "";
-  return `<button class="anillo" data-anillo aria-label="${descansoT ? "Parar el descanso: quedan " + mmss(Math.max(0, r)) : "Iniciar el descanso"}">
+  return `<span class="anillo" role="timer" aria-label="${descansoT ? "Descanso: quedan " + mmss(Math.max(0, r)) : "Descanso de " + txt}">
     <svg viewBox="0 0 52 52" aria-hidden="true"><circle class="tr" cx="26" cy="26" r="22"/><circle class="pr" id="dock-p" cx="26" cy="26" r="22" stroke-dasharray="${(hecho * ANILLO).toFixed(1)} ${ANILLO}" transform="rotate(-90 26 26)"/></svg>
-    <span id="dock-t">${txt}</span></button>`;
+    <span id="dock-t">${txt}</span></span>`;
 }
 const itemEdit = () => edit ? itemDeClave(edit.w, edit.key) : null;
 function valorEdit() { return edit ? serieTxt({kg: edit.kg, reps: edit.reps, rpe: edit.rpe}) : ""; }
@@ -1206,7 +1253,7 @@ function renderDock() {
   if (!ver) { root.innerHTML = ""; return; }
   root.innerHTML = `<div class="dock"><div class="dock-in">
     ${anilloHtml(it ? descanso(it) : "")}
-    <div class="dock-txt"><span class="k" id="dock-l">${it ? `Serie ${edit.idx + 1} · ${esc(nombrePlan(it))}` : `Descanso${descansoT.nombre ? " · " + esc(descansoT.nombre) : ""}`}</span><span class="v" id="dock-v">${it ? esc(valorEdit()) : "a la siguiente serie"}</span></div>
+    <div class="dock-txt"><span class="k" id="dock-l">${it ? `Serie ${edit.idx + 1} · ${esc(nombreHoy((LOG[edit.w] || {})[edit.key], it))}` : `Descanso${descansoT.nombre ? " · " + esc(descansoT.nombre) : ""}`}</span><span class="v" id="dock-v">${it ? esc(valorEdit()) : "a la siguiente serie"}</span></div>
     ${it ? `<button class="dock-ok" data-guardarset aria-label="Guardar la serie ${edit.idx + 1}">${ICON.ok}</button>`
       : `<button class="dock-ok" data-tstop aria-label="Parar el descanso">${ICON.x}</button>`}
   </div></div>`;
@@ -1765,7 +1812,7 @@ function abrirRegistro(w, key) {
     if (it.lado && !antiguo) fila.lado = v.lado || (i % 2 ? "der" : "izq");  // por lado: izquierda primero, como pide tu plan
     rows.push(fila);
   }
-  const hecho = hechoDe(prev, it), esOtro = !opcionesHecho(it).some(o => o[0] === hecho.id);
+  const hecho = hechoNuevo(prev, it), esOtro = !opcionesHecho(it).some(o => o[0] === hecho.id);
   const libre = rows.findIndex(filaVacia);
   sheet = {tipo: "reg", w, key, it, rows, sel: libre >= 0 ? libre : rows.length - 1, hid: esOtro ? "otro" : hecho.id, otro: esOtro ? hecho.n : "", com: (prev && prev.com) || ""};
   ui.dockCtl = false;
@@ -1773,8 +1820,11 @@ function abrirRegistro(w, key) {
   marcarHoja();
   renderSheet(true);
 }
-function abrirExtra(did) {
-  sheet = {tipo: "extra", w: ui.week, did, nombre: "", rows: [1, 2, 3].map(() => ({kg: "", reps: "", rpe: ""}))};
+function abrirExtra(did, i) {
+  const x = i != null ? ((LOG[ui.week] || {})["x~" + did] || [])[i] : null;
+  const fila = v => ({kg: v.kg == null ? "" : numTxt(v.kg), reps: v.reps ?? "", rpe: v.rpe == null ? "" : numTxt(v.rpe)});
+  sheet = x ? {tipo: "extra", w: ui.week, did, idx: i, t: x.t, nombre: x.n, rows: x.sets.map(fila).concat([{kg: "", reps: "", rpe: ""}])}
+    : {tipo: "extra", w: ui.week, did, nombre: "", rows: [1, 2, 3].map(() => ({kg: "", reps: "", rpe: ""}))};
   marcarHoja();
   renderSheet(true);
 }
@@ -1863,7 +1913,7 @@ function renderSheet(primera) {
     const s = W[sheet.w - 1], di = s.dias.findIndex(d => d.id === sheet.did);
     html = `<div class="sheet${primera ? " entra" : ""}" role="dialog" aria-modal="true" aria-labelledby="sh-h"><div class="sheet-in">
       <div class="sheet-top"><button class="back" data-sheet-close aria-label="Volver">${ICON.back}</button>
-        <div class="top-txt"><span class="eyebrow">S${s.w} · D${di + 1} · fuera del plan</span><h1 id="sh-h">Ejercicio extra</h1></div></div>
+        <div class="top-txt"><span class="eyebrow">S${s.w} · D${di + 1} · fuera del plan</span><h1 id="sh-h">${sheet.t ? "Corregir extra" : "Ejercicio extra"}</h1></div></div>
       <div class="sheet-body">
         <label class="fl">Nombre<input class="inp" data-xn value="${esc(sheet.nombre)}" placeholder="Ej. curl de muñeca"></label>
         <div class="sets-x"><div class="sets-h"><span></span><span>KG</span><span>REPS</span><span>RPE</span></div>
@@ -1900,6 +1950,21 @@ function leerSets() {
     if (r.lado) o.lado = r.lado;
     return o;
   }).filter(Boolean);
+}
+/* Elegir en «Hiciste» vale al instante: queda para este ejercicio (también las semanas que siguen)
+   y, si ya anotaste series, pasan a la variante. Volver al del plan la quita. */
+function fijarVariante() {
+  const it = sheet.it, w = sheet.w, key = sheet.key, h = hechoSheet();
+  registrar("variante", `S${w} ${key} · ${nombrePlan(it)} → ${h.n}`);
+  if (w >= st.actual) {
+    st.variantes = Object.assign({}, st.variantes);
+    if (h.id === it.ex) delete st.variantes[it.ex]; else st.variantes[it.ex] = h;
+    dirty.estado = marca();
+  }
+  const prev = (LOG[w] || {})[key];
+  if (registrado(prev) && (!prev.hecho || prev.hecho.id !== h.id)) guardarEntrada(w, key, Object.assign({}, prev, {hecho: h, t: Date.now()}), it);
+  else pedirGuardado(300);
+  if (edit && edit.w === w && edit.key === key) edit = nuevoEdit(w, key, edit.idx);
 }
 function hechoSheet() {
   const it = sheet.it;
@@ -1939,6 +2004,8 @@ function guardarSheet(modo) {
     entry = Object.assign(base, {hecho: hechoSheet(), sets});
   }
   if (com) entry.com = com;
+  { const prevH = (LOG[w] || {})[key];
+    registrar("hoja", `${modo || "guardar"} · S${w} ${key} · ${entry.hecho.n} · ${entry.omitido ? "no lo hizo" : resumen(entry.sets)}${registrado(prevH) && !prevH.omitido ? " (antes " + resumen(prevH.sets) + ")" : ""}`); }
   guardarEntrada(w, key, entry, it);
   if (edit && edit.w === w && edit.key === key) {
     const s = W[w - 1], d = s.dias.find(x => x.id === key.split(":")[0]);
@@ -1954,11 +2021,14 @@ function guardarExtraSheet() {
   if (!n || !sets.length) { toast("Pon un nombre y al menos una serie."); return; }
   const w = sheet.w, k = "x~" + sheet.did;
   LOG[w] = LOG[w] || {};
-  LOG[w][k] = (LOG[w][k] || []).concat([{v: 2, n, id: "extra:" + slug(n), sets, t: Date.now()}]);
+  const lista = LOG[w][k] || [], j = sheet.t ? lista.findIndex(x => x.t === sheet.t) : -1;
+  const nuevo = {v: 2, n, id: "extra:" + slug(n), sets, t: j >= 0 ? sheet.t : Date.now()};  // corregido: mismo t, reemplaza al de tu cuenta
+  registrar("extra", `${j >= 0 ? "corrige" : "nuevo"} · S${w} ${sheet.did} · ${n} · ${resumen(sets)}${j >= 0 ? " (antes " + lista[j].n + " · " + resumen(lista[j].sets) + ")" : ""}`);
+  LOG[w][k] = j >= 0 ? lista.map((x, i) => i === j ? nuevo : x) : lista.concat([nuevo]);
   dirty.weeks[w] = marca();
   pedirGuardado(300);
   cerrarSheet();
-  toast("Extra guardado.");
+  toast(j >= 0 ? "Extra corregido." : "Extra guardado.");
 }
 
 /* ── historial por ejercicio: todas tus sesiones, también con variantes guardadas con ese nombre ── */
@@ -2036,7 +2106,7 @@ function guardarBorrador() {
     const b = {t: Date.now(), quien: storeKey(), w: ui.week, day: ui.day, edit: edit && edit.tocado ? edit : null};
     if (sheet && sheet.tipo !== "hist") b.sheet = sheet.tipo === "reg"
       ? {tipo: "reg", w: sheet.w, key: sheet.key, rows: sheet.rows, sel: sheet.sel, hid: sheet.hid, otro: sheet.otro, com: sheet.com}
-      : {tipo: "extra", w: sheet.w, did: sheet.did, nombre: sheet.nombre, rows: sheet.rows};
+      : {tipo: "extra", w: sheet.w, did: sheet.did, idx: sheet.idx, t: sheet.t, nombre: sheet.nombre, rows: sheet.rows};
     localStorage.setItem(BKEY, JSON.stringify(b));
   } catch (e) {}
 }
@@ -2167,7 +2237,14 @@ function irSemana(w) {
   window.scrollTo(0, 0);
 }
 let toastT = null;
+let deshacerFn = null;
+function toastDeshacer(msg, fn) {
+  deshacerFn = fn;
+  $("#toast-root").innerHTML = `<div class="toast con-accion" role="status"><span>${esc(msg)}</span><button class="toast-btn" data-deshacer>Deshacer</button></div>`;
+  clearTimeout(toastT); toastT = setTimeout(() => { $("#toast-root").innerHTML = ""; deshacerFn = null; }, 8000);
+}
 function toast(msg) {
+  deshacerFn = null;
   const r = $("#toast-root");
   r.innerHTML = `<div class="toast" role="status">${esc(msg)}</div>`;
   clearTimeout(toastT); toastT = setTimeout(() => { r.innerHTML = ""; }, 2600);
@@ -2257,15 +2334,11 @@ document.addEventListener("click", async e => {
     st.medidas = (st.medidas || []).concat([m]);
     dirty.estado = marca(); pedirGuardado(300); renderAno(); toast("Medición guardada."); return;
   }
-  if ("anillo" in ds) {  // un toque inicia el descanso; con el descanso corriendo, lo para
-    if (descansoT) return pararDescanso();
-    const it = sheet && sheet.it ? sheet.it : itemEdit();
-    if (it) iniciarDescanso(segundosDescanso(descanso(it)), nombrePlan(it));
-    return;
-  }
   if (ds.selrow !== undefined && sheet) { sheet.sel = Number(ds.selrow); renderSheet(); return; }
   if (ds.open) return abrirRegistro(ui.week, ds.open);
   if (ds.extraOpen) return abrirExtra(ds.extraOpen);
+  if (ds.editx) return abrirExtra(ds.editx, Number(ds.i));
+  if ("deshacer" in ds) { const f = deshacerFn; deshacerFn = null; $("#toast-root").innerHTML = ""; if (f) f(); return; }
   if (ds.mas) { ui.mas = ds.mas; ui.cat.prog = null; saveStore(); render(); return; }
   if (ds.catobj || ds.catdias) { if (ds.catobj) ui.cat.obj = ds.catobj; else ui.cat.dias = ds.catdias; renderMas(); return; }
   if (ds.prog) {
@@ -2284,8 +2357,18 @@ document.addEventListener("click", async e => {
     const w = ui.week, k = "x~" + ds.delx, i = Number(ds.i);
     if (!LOG[w] || !LOG[w][k]) return;
     const x = LOG[w][k].splice(i, 1)[0];
-    if (x) LOG[w]._del = [...(LOG[w]._del || []), x.t];
-    dirty.weeks[w] = marca(); pedirGuardado(300); render(); return;
+    if (!x) return;
+    LOG[w]._del = [...(LOG[w]._del || []), x.t];
+    registrar("extra", `borra · S${w} ${ds.delx} · ${x.n} · ${resumen(x.sets)}`);
+    dirty.weeks[w] = marca(); pedirGuardado(300); render();
+    // deshacer: vuelve con un t nuevo, porque el borrado ya pudo llegar a tu cuenta
+    toastDeshacer(`Borraste «${x.n}».`, () => {
+      LOG[w] = LOG[w] || {};
+      LOG[w][k] = (LOG[w][k] || []).concat([Object.assign({}, x, {t: Date.now()})]);
+      registrar("extra", `deshace el borrado · ${x.n}`);
+      dirty.weeks[w] = marca(); pedirGuardado(300); render(); toast("Volvió.");
+    });
+    return;
   }
   if (ds.setrm) {
     const lift = ds.setrm, v = Number(ds.v), w = Number(ds.w);
@@ -2341,7 +2424,7 @@ document.addEventListener("input", e => {
   }
   if ("pnombre" in t.dataset) { ui.partida.nombre = t.value; return; }
   if ("invrepo" in t.dataset) { ui.inv.nuevo = t.value; ui.inv.enlace = ""; return; }
-  if (sheet && "otro" in t.dataset) { sheet.otro = t.value; guardarBorrador(); return; }
+  if (sheet && "otro" in t.dataset) { sheet.otro = t.value; guardarBorrador(); clearTimeout(fijarVariante.t); fijarVariante.t = setTimeout(() => { if (sheet && sheet.hid === "otro" && (sheet.otro || "").trim()) fijarVariante(); }, 800); return; }
   if (sheet && "com" in t.dataset) { sheet.com = t.value; guardarBorrador(); return; }
   if (sheet && "xn" in t.dataset) { sheet.nombre = t.value; guardarBorrador(); return; }
   if (t.dataset.dn) {
@@ -2377,6 +2460,7 @@ document.addEventListener("change", e => {
   }
   if (sheet && "hecho" in t.dataset) {
     sheet.hid = t.value;
+    if (t.value !== "otro") fijarVariante();
     renderSheet();
     if (t.value === "otro") { const o = $("[data-otro]"); if (o) o.focus(); }
     return;
@@ -2443,6 +2527,7 @@ window.addEventListener("popstate", () => { if (visor) cerrarVisor(true); else i
   if (conHoja) { marcarHoja(); renderSheet(true); toast("Recuperé lo que estabas anotando."); }
   else if (edit && edit.tocado) toast("Recuperé la serie que estabas anotando.");
   if (descansoT) tickDescanso();
+  registrar("abrir", `S${st.actual} · ${navigator.onLine === false ? "sin señal" : "con señal"}`);
   setSync(conectado() ? (navigator.onLine ? "saving" : "offline") : "local", conectado() ? "" : "Guardado solo en este teléfono");
   if (conectado()) enCola(pull);
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
