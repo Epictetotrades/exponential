@@ -7,6 +7,7 @@
 /* ── versión: súbela en cada publicación (y la etiqueta vX.Y en git). Después de x.9 sigue (x+1).0:
    «1.10» se lee 1,1 y parece anterior a la 1.9. ── */
 const VERSIONES = [
+  {n: "3.2", nombre: "Tus cargas, tu vez anterior", fecha: "24 nov 2026", txt: "Si el plan cambia el rango de reps de un accesorio, la carga sale de tu última serie llevada al rango nuevo (tabla p.64), no de una carga genérica. La tarjeta abierta muestra lo que hiciste la vez anterior. Hoy abre el día que sigue al último que entrenaste y salta los que llevas 3 semanas sin hacer. La vuelta tras una pausa parte de lo que hiciste tú."},
   {n: "3.1", nombre: "Vuelta y semana al día", fecha: "24 nov 2026", txt: "Si vuelves a un ejercicio tras 3 semanas o más, la tarjeta te muestra la última vez que lo hiciste y te sugiere un 10 % menos, con el calentamiento ajustado; luego ajustas por RPE (p.38). Al anotar en una semana posterior, esa pasa a ser tu semana actual, así el descanso empieza solo y el ejercicio siguiente se abre solo."},
   {n: "3.0", nombre: "Variantes que se quedan", fecha: "24 nov 2026", txt: "Lo que eliges en «Hiciste» vale al instante: la tarjeta de Hoy y la serie quedan con esa variante, que sigue las semanas siguientes hasta que vuelvas al del plan. Los extras se corrigen y al borrar puedes deshacer. El descanso empieza solo al guardar la serie; el anillo solo muestra el tiempo. La app anota lo que haces en uso/ de tu repositorio, para revisar qué mejorar."},
   {n: "2.9", nombre: "Descanso más sutil", fecha: "23 oct 2026", txt: "La barra del descanso se ve solo en Hoy. Un toque al anillo inicia el descanso y otro lo para, sin menú. En las otras pestañas el descanso sigue corriendo y al terminar te avisa."},
@@ -532,6 +533,19 @@ function ultimoKg(hid) {
 /* Vuelta tras una pausa: si pasaron 21 días o más desde la última vez que hiciste este ejercicio,
    se parte de lo último que anotaste y un 10 % más liviano, y se ajusta por RPE (p.38, p.218). */
 const PAUSA_DIAS = 21, BAJA_VUELTA = 0.9;
+function ultimaVez(it) {
+  let t = 0;
+  for (const w of Object.keys(LOG)) for (const [k, e] of Object.entries(LOG[w] || {})) {
+    if (k.includes("~") || !e || e.omitido || !e.sets || !e.sets.length || !e.t) continue;
+    if ((e.plan && e.plan.id) === it.ex || (e.hecho && e.hecho.id) === it.ex) t = Math.max(t, e.t);
+  }
+  return t;
+}
+/* Un día está en pausa si ya hiciste sus ejercicios alguna vez y ninguno en los últimos 21 días. */
+function diaEnPausa(d) {
+  const ts = itemsEj(d).map(ultimaVez).filter(Boolean);
+  return ts.length > 0 && Date.now() - Math.max(...ts) >= PAUSA_DIAS * 864e5;
+}
 function vueltaDe(it) {
   let ult = null;
   for (const w of Object.keys(LOG)) for (const [k, e] of Object.entries(LOG[w] || {})) {
@@ -548,14 +562,35 @@ function vueltaDe(it) {
 function cargaVuelta(s, it, base) {
   if (s.w < st.actual) return base;
   const v = vueltaDe(it), b = num(base) || 0; if (!v) return base;
-  const ref = b && v.kg ? Math.min(b, v.kg) : b || v.kg;
+  const deTuRegistro = it.k === "main" || !!cargaRegistro(s, it);  // sin registro, la carga del plan es genérica: manda lo último que hiciste
+  const ref = !deTuRegistro ? v.kg || b : b && v.kg ? Math.min(b, v.kg) : b || v.kg;
   return ref ? r25(ref * BAJA_VUELTA) : base;
+}
+function antesHtml(s, it, key) {
+  const a = antesDe(s.w, key, it);
+  return /^S\d+ · /.test(a) && !a.includes("(") ? `<span class="antes"><span class="k">ANTES</span> ${esc(a)}</span>` : "";
 }
 function vueltaHtml(s, it, prev) {
   if (s.w < st.actual || registrado(prev) || !["main", "acc", "amrap", "single"].includes(it.k)) return "";
   const v = vueltaDe(it); if (!v) return "";
   const f = new Date(v.t), fecha = `${f.getDate()} ${["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"][f.getMonth()]}`;
   return `<span class="vuelta"><b>Vuelves tras ${Math.round(v.dias / 7)} semanas.</b> Última vez, el ${esc(fecha)}: ${esc(v.txt)}. ${v.kg ? "Empieza un 10 % más liviano y" : "Empieza con menos reps y"} ajusta por RPE <span class="pg">p.38</span></span>`;
+}
+/* Accesorio con registro: la carga que toca según tu progresión. Si el plan cambió el rango de reps,
+   tu mejor serie de la última vez se lleva al rango nuevo con la tabla de p.64, redondeando hacia abajo. */
+const pisoKg = x => x >= 20 ? Math.floor(x / 2.5 + 1e-9) * 2.5 : Math.floor(x + 1e-9);
+function cargaRegistro(s, it) {
+  const pr = it.k === "acc" && PROG[it.ex];
+  if (!pr || !(pr.w < s.w)) return "";
+  if (pr.reps === String(it.reps)) return pr.next || "";
+  const e = pr.key && LOG[pr.w] && LOG[pr.w][pr.key], sets = e && !e.omitido && e.sets ? e.sets : [];
+  const top = sets.reduce((a, x) => !a || num(x.kg) > num(a.kg) || (num(x.kg) === num(a.kg) && num(x.reps) > num(a.reps)) ? x : a, null);
+  const lo = rango(it.reps)[0];
+  if (!top || !(num(top.kg) > 0) || !(num(top.reps) > 0) || !lo) return pr.kg || "";
+  const conv = pisoKg(num(top.kg) * pctDeReps(lo) / pctDeReps(num(top.reps)));
+  // con muchas reps la tabla es poco precisa (p.115, p.120): nunca más de lo que ya daba tu progresión
+  const tope = num(pr.next) || num(pr.kg);
+  return tope ? Math.min(conv, tope) : conv;
 }
 function cargaSugerida(s, it, hid) {
   if (hid && hid !== it.ex && it.k !== "main") { const p = PROG[hid]; return p ? (p.next || p.kg || "") : ultimoKg(hid); }  // en un básico, la variante parte del % del plan y se ajusta por RPE
@@ -564,8 +599,8 @@ function cargaSugerida(s, it, hid) {
   else if (it.k === "amrap") planKg = cargaAmrap(s);
   else if (it.k === "single") planKg = r25(rmDe(s.w, it.lift) * 0.9);
   else if (it.kg) planKg = it.kg;
-  const pr = it.k === "acc" && PROG[it.ex];
-  if (pr && pr.w < s.w && pr.reps === String(it.reps) && pr.next) planKg = pr.next;
+  const reg = cargaRegistro(s, it);
+  if (reg) planKg = reg;
   return planKg;
 }
 function aplicarProgresion(w, it, entry, key) {
@@ -658,8 +693,8 @@ function planTxt(s, it) {
   if (it.k === "single") { const rm = rmDe(s.w, it.lift); return `${kg(r25(rm * .8))} → ${kg(r25(rm * .9))} → single a RPE ${it.rpe}`; }
   if (it.k === "amrap") return `1 serie al máximo con ${kg(cargaAmrap(s))}`;
   if (it.k === "pot") return it.pres + (it.pct ? " · " + kg(r25(rmDe(s.w, it.lift) * it.pct / 100)) : "");
-  const pr = PROG[it.ex], usaReg = pr && pr.w < s.w && pr.reps === String(it.reps) && pr.next;
-  const carga = it.pc ? " · peso corporal" : usaReg ? ` · ≈ ${kg(pr.next)}` : it.kg ? ` · ≈ ${kg(it.kg)}` : "";
+  const reg = it.pc ? "" : cargaRegistro(s, it);
+  const carga = it.pc ? " · peso corporal" : reg ? ` · ≈ ${kg(reg)}` : it.kg ? ` · ≈ ${kg(it.kg)}` : "";
   return `${it.sets} × ${it.reps}${carga}${it.rpe ? " · RPE " + it.rpe : ""}`;
 }
 function detalleTxt(s, it) {
@@ -873,7 +908,7 @@ function itemRow(s, d, it) {
       <button class="ex" data-abrir="${esc(key)}" aria-expanded="true">
         <span class="ex-h"><b class="nombre">${esc(hechoNuevo(prev, it).id !== it.ex ? hechoNuevo(prev, it).n : conMeta(it.n))}</b><span class="tag">${esc(tags)}</span></span>${hechoNuevo(prev, it).id !== it.ex ? `<span class="hint">En lugar de ${esc(nombrePlan(it))}. Para volver, elige el del plan en «Hiciste».</span>` : ""}
         <span class="v">${esc(planTxt(s, it))}</span>
-        ${vueltaHtml(s, it, prev)}
+        ${vueltaHtml(s, it, prev) || antesHtml(s, it, key)}
       </button>
       ${calor}
       <div class="scs">${chips}</div>
@@ -2172,8 +2207,12 @@ function restaurarBorrador() {
 /* ── vistas ── */
 function autoDia() {
   const s = W[ui.week - 1], log = LOG[s.w] || {};
-  const i = s.dias.findIndex(d => itemsEj(d).some(it => !registrado(log[claveDe(d.id, it)])));
-  const dia = i >= 0 ? i : 0;
+  const pend = d => itemsEj(d).some(it => !registrado(log[claveDe(d.id, it)]));
+  let ultimo = -1, tUlt = 0;  // el día de esta semana que anotaste más recién
+  s.dias.forEach((d, j) => itemsEj(d).forEach(it => { const e = log[claveDe(d.id, it)]; if (registrado(e) && (e.t || 0) > tUlt) { tUlt = e.t; ultimo = j; } }));
+  const n = s.dias.length, orden = Array.from({length: n}, (_, j) => (ultimo + 1 + j) % n);
+  const i = [orden.find(j => pend(s.dias[j]) && !diaEnPausa(s.dias[j])), s.dias.findIndex(pend)].find(j => j != null && j >= 0);
+  const dia = i != null && i >= 0 ? i : 0;
   // Si estabas anotando una serie de esta semana, se queda abierta en su día.
   if (edit && edit.tocado && edit.w === s.w) {
     const d = s.dias.findIndex(x => x.id === edit.key.split(":")[0]);

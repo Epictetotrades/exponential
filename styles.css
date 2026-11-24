@@ -515,3 +515,7 @@ body.con-dock .toast { bottom: calc(var(--nav-h) + var(--dock-h) + var(--safe-b)
 /* vuelta tras una pausa */
 .vuelta { display: block; margin-top: 8px; padding: 8px 10px; border-left: 2px solid var(--acc); background: var(--bg2, transparent); font-size: 14.5px; line-height: 1.45; color: var(--tx2); }
 .vuelta b { color: var(--tx); font-weight: 600; }
+
+/* la vez anterior, en la tarjeta abierta */
+.antes { display: block; margin-top: 4px; font-family: var(--mono, monospace); font-size: 14px; color: var(--tx2); }
+.antes .k { font-size: 11px; letter-spacing: .08em; color: var(--mut); margin-right: 6px; }
