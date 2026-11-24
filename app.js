@@ -7,6 +7,7 @@
 /* ── versión: súbela en cada publicación (y la etiqueta vX.Y en git). Después de x.9 sigue (x+1).0:
    «1.10» se lee 1,1 y parece anterior a la 1.9. ── */
 const VERSIONES = [
+  {n: "3.1", nombre: "Vuelta y semana al día", fecha: "24 nov 2026", txt: "Si vuelves a un ejercicio tras 3 semanas o más, la tarjeta te muestra la última vez que lo hiciste y te sugiere un 10 % menos, con el calentamiento ajustado; luego ajustas por RPE (p.38). Al anotar en una semana posterior, esa pasa a ser tu semana actual, así el descanso empieza solo y el ejercicio siguiente se abre solo."},
   {n: "3.0", nombre: "Variantes que se quedan", fecha: "24 nov 2026", txt: "Lo que eliges en «Hiciste» vale al instante: la tarjeta de Hoy y la serie quedan con esa variante, que sigue las semanas siguientes hasta que vuelvas al del plan. Los extras se corrigen y al borrar puedes deshacer. El descanso empieza solo al guardar la serie; el anillo solo muestra el tiempo. La app anota lo que haces en uso/ de tu repositorio, para revisar qué mejorar."},
   {n: "2.9", nombre: "Descanso más sutil", fecha: "23 oct 2026", txt: "La barra del descanso se ve solo en Hoy. Un toque al anillo inicia el descanso y otro lo para, sin menú. En las otras pestañas el descanso sigue corriendo y al terminar te avisa."},
   {n: "2.8", nombre: "Usar un programa", fecha: "23 oct 2026", txt: "En Más › Programas, «Usar desde la próxima semana» (o desde esta) convierte el programa en tu plan: Hoy, Semana y Año lo siguen y se repite hasta la S52. Lo anterior no cambia y puedes dejarlo cuando quieras. Las fichas muestran cada día en su recuadro y los nombres ya no se repiten. Los textos que se leen son más grandes y oscuros, y cada «p.64» abre esa página del libro: el PDF se abre una vez y queda en el teléfono."},
@@ -528,6 +529,34 @@ function ultimoKg(hid) {
       if (e && e.hecho && e.hecho.id === hid && e.sets && e.sets.length) return e.sets[e.sets.length - 1].kg || "";
   return "";
 }
+/* Vuelta tras una pausa: si pasaron 21 días o más desde la última vez que hiciste este ejercicio,
+   se parte de lo último que anotaste y un 10 % más liviano, y se ajusta por RPE (p.38, p.218). */
+const PAUSA_DIAS = 21, BAJA_VUELTA = 0.9;
+function vueltaDe(it) {
+  let ult = null;
+  for (const w of Object.keys(LOG)) for (const [k, e] of Object.entries(LOG[w] || {})) {
+    if (k.includes("~") || !e || e.omitido || !e.sets || !e.sets.length || !e.t) continue;
+    if ((e.plan && e.plan.id) !== it.ex && (e.hecho && e.hecho.id) !== it.ex) continue;
+    if (!ult || e.t > ult.t) ult = e;
+  }
+  if (!ult) return null;
+  const dias = Math.floor((Date.now() - ult.t) / 864e5);
+  if (dias < PAUSA_DIAS) return null;
+  const top = ult.sets.reduce((a, x) => (num(x.kg) || 0) > (num(a.kg) || 0) ? x : a, ult.sets[0]);
+  return {dias, t: ult.t, kg: num(top.kg) || 0, txt: resumen(ult.sets)};
+}
+function cargaVuelta(s, it, base) {
+  if (s.w < st.actual) return base;
+  const v = vueltaDe(it), b = num(base) || 0; if (!v) return base;
+  const ref = b && v.kg ? Math.min(b, v.kg) : b || v.kg;
+  return ref ? r25(ref * BAJA_VUELTA) : base;
+}
+function vueltaHtml(s, it, prev) {
+  if (s.w < st.actual || registrado(prev) || !["main", "acc", "amrap", "single"].includes(it.k)) return "";
+  const v = vueltaDe(it); if (!v) return "";
+  const f = new Date(v.t), fecha = `${f.getDate()} ${["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"][f.getMonth()]}`;
+  return `<span class="vuelta"><b>Vuelves tras ${Math.round(v.dias / 7)} semanas.</b> Última vez, el ${esc(fecha)}: ${esc(v.txt)}. ${v.kg ? "Empieza un 10 % más liviano y" : "Empieza con menos reps y"} ajusta por RPE <span class="pg">p.38</span></span>`;
+}
 function cargaSugerida(s, it, hid) {
   if (hid && hid !== it.ex && it.k !== "main") { const p = PROG[hid]; return p ? (p.next || p.kg || "") : ultimoKg(hid); }  // en un básico, la variante parte del % del plan y se ajusta por RPE
   let planKg = "";
@@ -601,7 +630,14 @@ function guardarEntrada(w, key, entry, it) {
   LOG[w][key] = entry;
   if (it) aplicarProgresion(w, it, entry, key);
   dirty.weeks[w] = marca();
+  // anotar en una semana posterior la vuelve la actual: el descanso, la apertura sola y la entrada a la app la siguen
+  let avanza = false;
+  if (w > st.actual && !esPlantilla(w) && !entry.omitido && entry.sets && entry.sets.length) {
+    registrar("semana", `S${st.actual} → S${w} al anotar`);
+    st.actual = w; dirty.estado = marca(); avanza = true;
+  }
   pedirGuardado(300);
+  return avanza ? ` La S${w} es ahora tu semana actual.` : "";
 }
 
 /* ── textos del plan ── */
@@ -761,7 +797,7 @@ function nuevoEdit(w, key, idx) {
   const ref = sets[i] || sets[sets.length - 1];
   const ultimo = sets.length ? sets[sets.length - 1].lado : null;  // por lado: alterna, empezando por la izquierda (tu plan)
   return {w, key, idx: i,
-    kg: ref ? ref.kg : (cargaSugerida(s, it, hechoNuevo(prev, it).id) || ""),
+    kg: ref ? ref.kg : cargaVuelta(s, it, cargaSugerida(s, it, hechoNuevo(prev, it).id) || ""),
     reps: ref ? ref.reps : it.k === "single" ? 1 : it.k === "amrap" ? "" : rango(it.reps)[0],
     rpe: sets[i] && sets[i].rpe != null ? sets[i].rpe : null,
     lado: it.lado ? (sets[i] ? sets[i].lado || "izq" : ultimo === "izq" ? "der" : "izq") : null};
@@ -815,13 +851,14 @@ function itemRow(s, d, it) {
     <button class="ex" data-abrir="${esc(key)}" aria-expanded="false">
       <span class="ex-h"><b class="nombre">${esc(conMeta(it.n))}</b><span class="chip ${cls}">${txt}</span></span>
       <span class="kv"><span class="k">PLAN</span><span class="v">${esc(planTxt(s, it))}</span>${hecho ? `<span class="k">HECHO</span><span class="v fuerte">${esc(hecho)}</span>` : ""}</span>
+      ${vueltaHtml(s, it, prev)}
       ${prev && prev.com ? `<span class="cita">“${esc(prev.com)}”</span>` : ""}
     </button>${extra}</div></div>`;
   const sets = prev && prev.sets && !prev.omitido ? prev.sets : [];
   const tags = [esBasico(it) ? "Básico" : it.prio ? "Prioridad" : "", it.lado ? "por lado" : "", "descanso " + descanso(it)].filter(Boolean).join(" · ");
   const hh = hechoDe(prev, it), barra = CON_BARRA.has(hh.id);
   // calentamiento (p.224): solo en los básicos y antes de la primera serie de trabajo
-  const pasos = it.k === "main" && !sets.length ? calentamiento(it, cargaSugerida(s, it, hh.id), barra) : [];
+  const pasos = it.k === "main" && !sets.length ? calentamiento(it, cargaVuelta(s, it, cargaSugerida(s, it, hh.id)), barra) : [];
   const listos = ui.calor[key] || [];
   const calor = pasos.length ? `<div class="calor"><span class="k acc">Calentamiento · ${listos.length} de ${pasos.length} <span class="pg">p.224</span></span>
       <div class="scs">${pasos.map((t, i) => `<button class="sc ${listos.includes(i) ? "hecha" : "nueva"}" data-calor="${esc(key)}" data-i="${i}" aria-pressed="${listos.includes(i)}">${listos.includes(i) ? ICON.ok : ""}${esc(t)}</button>`).join("")}</div>
@@ -836,6 +873,7 @@ function itemRow(s, d, it) {
       <button class="ex" data-abrir="${esc(key)}" aria-expanded="true">
         <span class="ex-h"><b class="nombre">${esc(hechoNuevo(prev, it).id !== it.ex ? hechoNuevo(prev, it).n : conMeta(it.n))}</b><span class="tag">${esc(tags)}</span></span>${hechoNuevo(prev, it).id !== it.ex ? `<span class="hint">En lugar de ${esc(nombrePlan(it))}. Para volver, elige el del plan en «Hiciste».</span>` : ""}
         <span class="v">${esc(planTxt(s, it))}</span>
+        ${vueltaHtml(s, it, prev)}
       </button>
       ${calor}
       <div class="scs">${chips}</div>
@@ -892,7 +930,7 @@ function guardarSerie() {
   if (it.lado) sets[i].lado = edit.lado || "izq";
   const entry = {v: 2, t: Date.now(), plan: {id: it.ex, n: nombrePlan(it)}, hecho: hechoNuevo(prev, it), sets};
   if (prev && prev.com) entry.com = prev.com;
-  guardarEntrada(w, key, entry, it);
+  const aviso = guardarEntrada(w, key, entry, it);
   if (w === st.actual) iniciarDescanso(segundosDescanso(descanso(it)), nombrePlan(it));
   const h = entry.hecho, pr = PROG[h.id], completo = sets.length >= nSeries(it) && i === sets.length - 1;
   if (completo) {
@@ -902,7 +940,7 @@ function guardarSerie() {
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   ui.dockCtl = false;
   render();
-  toast(`Serie ${i + 1} guardada.` + (completo && it.k === "acc" && pr && pr.w === w ? ` Próxima vez: ${kg(pr.next)}.` : ""));
+  toast(`Serie ${i + 1} guardada.` + aviso + (completo && it.k === "acc" && pr && pr.w === w ? ` Próxima vez: ${kg(pr.next)}.` : ""));
 }
 
 /* ── render: Semana (la semana entera como planilla) ── */
@@ -2006,7 +2044,7 @@ function guardarSheet(modo) {
   if (com) entry.com = com;
   { const prevH = (LOG[w] || {})[key];
     registrar("hoja", `${modo || "guardar"} · S${w} ${key} · ${entry.hecho.n} · ${entry.omitido ? "no lo hizo" : resumen(entry.sets)}${registrado(prevH) && !prevH.omitido ? " (antes " + resumen(prevH.sets) + ")" : ""}`); }
-  guardarEntrada(w, key, entry, it);
+  const aviso = guardarEntrada(w, key, entry, it);
   if (edit && edit.w === w && edit.key === key) {
     const s = W[w - 1], d = s.dias.find(x => x.id === key.split(":")[0]);
     if (entry.omitido || entry.sets.length >= nSeries(it)) ui.abierto = d ? pendienteDelDia(s, d) : null;
@@ -2014,7 +2052,7 @@ function guardarSheet(modo) {
   }
   const h = entry.hecho, pr = PROG[h.id];
   cerrarSheet();
-  toast(entry.omitido ? "Anotado: no lo hiciste." : it.k === "acc" && pr && pr.w === w ? `Guardado. Próxima vez: ${kg(pr.next)}.` : "Guardado.");
+  toast(aviso ? "Guardado." + aviso : entry.omitido ? "Anotado: no lo hiciste." : it.k === "acc" && pr && pr.w === w ? `Guardado. Próxima vez: ${kg(pr.next)}.` : "Guardado.");
 }
 function guardarExtraSheet() {
   const n = (sheet.nombre || "").trim(), sets = leerSets();
