@@ -2,6 +2,10 @@
 
 Lo mismo que muestra la app en Más › Versiones. La más nueva va primero.
 
+## 3.5 · Tus ejercicios y más movimientos — 25 nov 2026
+
+En Año, «Tus ejercicios» lista todo lo que has hecho con tu última vez y tu mejor serie; al tocar uno se abre su historial, que ahora incluye tus sesiones del Workout Tracker (solo como historial: no son semanas). En «Hiciste › Otro…» eliges entre 243 movimientos por músculo o buscas por nombre; los que ya escribiste aparecen primero. Al abrir, la app se pone en la semana más nueva en que ya anotaste.
+
 ## 3.4 · Menos ruido — 24 nov 2026
 
 La barra inferior muestra el nombre completo del ejercicio, en dos líneas si hace falta. Los ejercicios hechos ya no muestran «Detalles». La explicación del calentamiento sale las 3 primeras veces; después quedan solo los botones.

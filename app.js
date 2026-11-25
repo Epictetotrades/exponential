@@ -7,6 +7,7 @@
 /* ── versión: súbela en cada publicación (y la etiqueta vX.Y en git). Después de x.9 sigue (x+1).0:
    «1.10» se lee 1,1 y parece anterior a la 1.9. ── */
 const VERSIONES = [
+  {n: "3.5", nombre: "Tus ejercicios y más movimientos", fecha: "25 nov 2026", txt: "En Año, «Tus ejercicios» lista todo lo que has hecho con tu última vez y tu mejor serie; al tocar uno se abre su historial, que ahora incluye tus sesiones del Workout Tracker (solo como historial: no son semanas). En «Hiciste › Otro…» eliges entre 243 movimientos por músculo o buscas por nombre; los que ya escribiste aparecen primero. Al abrir, la app se pone en la semana más nueva en que ya anotaste."},
   {n: "3.4", nombre: "Menos ruido", fecha: "24 nov 2026", txt: "La barra inferior muestra el nombre completo del ejercicio, en dos líneas si hace falta. Los ejercicios hechos ya no muestran «Detalles». La explicación del calentamiento sale las 3 primeras veces; después quedan solo los botones."},
   {n: "3.3", nombre: "Más claro y registro firme", fecha: "24 nov 2026", txt: "«Próxima» va en una línea sin repetir el nombre, la tarjeta abierta muestra PLAN y ANTES alineados, y el aviso de vuelta completo sale solo en el primer ejercicio del día. El registro de uso sube al abrir, al salir y como mucho cada 5 minutos; si falla, queda en el teléfono hasta poder subirlo, no se duplica y anota también los errores de la app."},
   {n: "3.2", nombre: "Tus cargas, tu vez anterior", fecha: "24 nov 2026", txt: "Si el plan cambia el rango de reps de un accesorio, la carga sale de tu última serie llevada al rango nuevo (tabla p.64), no de una carga genérica. La tarjeta abierta muestra lo que hiciste la vez anterior. Hoy abre el día que sigue al último que entrenaste y salta los que llevas 3 semanas sin hacer. La vuelta tras una pausa parte de lo que hiciste tú."},
@@ -425,6 +426,7 @@ async function pull() {
     const semanas = [...new Set([st.actual, ui.week, st.actual - 1].filter(w => w >= 1 && w <= 52))];
     await Promise.all(semanas.map(w => cargarSemana(w, true)));
     saveStore();
+    if (alinearSemana()) pedirGuardado(300);
     if (!ui.dayTouched) { ui.week = st.actual; autoDia(); }
     if (!sheet && !editando()) render();
     if (uso().length) usoForzar = true;
@@ -1176,6 +1178,7 @@ function renderAno() {
       <span><i class="sw" style="background:var(--f-test)"></i>Test</span>
     </div>
     <h2>${esTuyo() ? "Tu meta de banca" : "Meta de banca"}</h2>${metaBanca()}
+    <h2>Tus ejercicios</h2>${ejerciciosHtml()}
     <h2>Medidas</h2>${medidasHtml()}
     <h2>Tus máximos</h2>
     <p class="small mut">Las cargas de cada tramo salen de estos números. Después de cada test, anota el resultado y las semanas siguientes se recalculan solas. Una casilla vacía usa la de arriba.</p>
@@ -1189,9 +1192,46 @@ function renderAno() {
 /* ── avance: cualquier ejercicio con series anotadas ── */
 const LIFT_N = {banca: "Banca", sentadilla: "Sentadilla", peso_muerto: "Peso muerto"};
 let historialPedido = false;
+/* ── historial previo: tus sesiones de Workout Tracker. Solo cuentan en el historial de cada movimiento:
+   no son semanas de Exponential, no mueven el avance, el volumen ni la progresión. ── */
+const PKEY = () => "exp-previo-" + storeKey();
+let PREVIO = null;
+function previo() {
+  if (PREVIO === null) { try { PREVIO = JSON.parse(localStorage.getItem(PKEY()) || "[]") || []; } catch (e) { PREVIO = []; } }
+  return PREVIO;
+}
+async function cargarPrevio() {
+  try {
+    const r = await getFile("previo/workout-tracker.json");
+    if (r.data && Array.isArray(r.data.e)) { PREVIO = r.data.e; try { localStorage.setItem(PKEY(), JSON.stringify(PREVIO)); } catch (e) {} }
+  } catch (e) {}
+}
+const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+const fechaCorta = iso => { const [a, m, d] = String(iso).split("-").map(Number); return `${d} ${MESES[m - 1]}${a !== new Date().getFullYear() ? " " + a : ""}`; };
+function ejerciciosHtml() {
+  const m = new Map();
+  const sumar = (id, n, sets, cuando, orden) => {
+    if (!id || !sets || !sets.length) return;
+    const x = m.get(id) || {id, n, veces: 0, ult: null, mejor: null};
+    x.veces++;
+    if (!x.ult || orden > x.ult.orden) { x.ult = {orden, cuando, sets}; x.n = n || x.n; }
+    sets.forEach(y => { const k = +y.kg || 0, r = +y.reps || 0; if (!x.mejor || k > x.mejor.kg || (k === x.mejor.kg && r > x.mejor.reps)) x.mejor = {kg: k, reps: r}; });
+    m.set(id, x);
+  };
+  previo().forEach(p => sumar(p.id, p.n, p.sets, fechaCorta(p.fecha), new Date(p.fecha).getTime()));
+  for (let w = 1; w <= 52; w++) entradasLog(w).forEach(e => { if (!String(e.id).startsWith("x:")) sumar(e.id, e.n, e.sets, "S" + w, 1e13 + w); });
+  const lista = [...m.values()].sort((a, b) => b.ult.orden - a.ult.orden);
+  if (!lista.length) return '<p class="small mut">Aquí aparecen los ejercicios que vayas anotando.</p>';
+  return `<p class="small mut">Lo más reciente primero. Toca uno para ver todas sus sesiones.</p><div class="ejs">${lista.map(x => `<button class="ej-r" data-hist="${esc(x.id)}" data-n="${esc(x.n)}">
+      <span class="ej-n">${esc(x.n)}</span>
+      <span class="ej-d"><span class="k">ÚLTIMA</span> ${esc(x.ult.cuando)} · ${esc(resumen(x.ult.sets))}</span>
+      <span class="ej-d"><span class="k">MEJOR</span> ${x.mejor.kg ? kg(x.mejor.kg) + " × " + x.mejor.reps : x.mejor.reps + " reps"} · ${x.veces} ${x.veces === 1 ? "sesión" : "sesiones"}</span>
+    </button>`).join("")}</div>`;
+}
 function cargarHistorial() {
   if (historialPedido || !conectado()) return;
   historialPedido = true;
+  cargarPrevio().then(() => { if (sheet && sheet.tipo === "hist") renderSheet(); else if (ui.tab === "ano" && !sheet && !editando()) render(); });
   const faltan = [];
   for (let w = 1; w <= st.actual; w++) if (!loaded[w]) faltan.push(w);
   Promise.all(faltan.map(w => cargarSemana(w))).then(() => {
@@ -1994,7 +2034,8 @@ function renderSheet(primera) {
         <div class="kv"><span class="k">PLAN</span><span class="v">${esc(planTxt(s, it))}</span><span class="k">ANTES</span><span class="v">${esc(antesDe(s.w, sheet.key, it))}</span><span class="k">DESCANSO</span><span class="v">${esc(descanso(it))}</span></div>
         ${detalleTxt(s, it).map(x => `<p class="small mut">${esc(x)}</p>`).join("")}
         <label class="fl">Hiciste<select class="inp" data-hecho>${ops.map(([id, nm]) => `<option value="${esc(id)}" ${id === sheet.hid ? "selected" : ""}>${esc(nm)}</option>`).join("")}<option value="otro" ${sheet.hid === "otro" ? "selected" : ""}>Otro…</option></select></label>
-        <label class="fl" ${sheet.hid === "otro" ? "" : "hidden"} id="otro-wrap">¿Cuál?<input class="inp" data-otro value="${esc(sheet.otro)}" placeholder="Queda con este nombre"></label>
+        <div ${sheet.hid === "otro" ? "" : "hidden"} id="otro-wrap"><label class="fl">¿Cuál?<input class="inp" data-otro value="${esc(sheet.otro)}" placeholder="Busca en la lista o escribe el nombre" autocomplete="off"></label>
+          <div id="mov-lista" class="mov-lista">${sheet.hid === "otro" ? movListaHtml() : ""}</div></div>
         <section class="foco" aria-label="Serie ${sheet.sel + 1}">
           <span class="k acc">Serie ${r.lado ? `${Math.floor(sheet.sel / 2) + 1} · ${r.lado === "izq" ? "izquierda" : "derecha"}` : sheet.sel + 1} · ${filaVacia(r) ? "en curso" : "editando"}</span>
           <div class="grandes">${grande("kg", r, ph)}<span class="por">×</span>${grande("reps", r, ph)}</div>
@@ -2070,6 +2111,33 @@ function fijarVariante() {
   else pedirGuardado(300);
   if (edit && edit.w === w && edit.key === key) edit = nuevoEdit(w, key, edit.idx);
 }
+/* ── movimientos para «Hiciste › Otro…»: los tuyos primero, luego la lista por músculo ── */
+let MOV = null;
+async function cargarMov() {
+  if (MOV) return MOV;
+  try { MOV = (await (await fetch("data/movimientos.json")).json()).grupos || []; } catch (e) { MOV = []; }
+  return MOV;
+}
+function movTuyos() {
+  const n = new Set();
+  for (const w of Object.keys(LOG)) for (const [k, e] of Object.entries(LOG[w] || {})) {
+    if (k.includes("~") || !e || !e.hecho) continue;
+    if (String(e.hecho.id).startsWith("otro:") && e.hecho.n && e.hecho.n !== "Otro ejercicio") n.add(e.hecho.n);
+  }
+  Object.values(st.variantes || {}).forEach(h => h && h.n && String(h.id).startsWith("otro:") && n.add(h.n));
+  return [...n].sort((a, b) => a.localeCompare(b, "es"));
+}
+const sinTilde = x => String(x).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+function movListaHtml() {
+  if (!MOV) { cargarMov().then(() => { const l = $("#mov-lista"); if (l) l.innerHTML = movListaHtml(); }); return '<p class="small mut">Cargando la lista…</p>'; }
+  const q = sinTilde((sheet && sheet.otro) || "").trim(), ok = n => !q || sinTilde(n).includes(q);
+  const grupos = [{n: "Los tuyos", ex: movTuyos()}].concat(MOV).map(g => ({n: g.n, ex: [...new Set(g.ex)].filter(ok)})).filter(g => g.ex.length);
+  if (!grupos.length) return `<p class="small mut">No está en la lista: queda con el nombre que escribiste.</p>`;
+  const boton = n => `<button class="sc mov${sheet && sheet.otro === n ? " sel" : ""}" data-mov="${esc(n)}">${esc(n)}</button>`;
+  return grupos.map(g => q || g.n === "Los tuyos"
+    ? `<div class="mov-g"><span class="k">${esc(g.n.toUpperCase())}</span><div class="scs">${g.ex.map(boton).join("")}</div></div>`
+    : `<details class="mov-g"><summary>${esc(g.n)} <span class="mut">· ${g.ex.length}</span></summary><div class="scs">${g.ex.map(boton).join("")}</div></details>`).join("");
+}
 function hechoSheet() {
   const it = sheet.it;
   if (sheet.hid === "otro") { const t = (sheet.otro || "").trim(); return t ? {id: "otro:" + slug(t), n: t} : {id: "otro:sin_nombre", n: "Otro ejercicio"}; }
@@ -2137,13 +2205,14 @@ function guardarExtraSheet() {
 
 /* ── historial por ejercicio: todas tus sesiones, también con variantes guardadas con ese nombre ── */
 function sesionesDe(id) {
-  const out = [];
+  const out = previo().filter(x => x.id === id && x.sets && x.sets.length)
+    .map(x => ({l: fechaCorta(x.fecha), previo: true, sets: x.sets, max: Math.max(...x.sets.map(y => +y.kg || 0)), com: ""}));
   for (let w = 1; w <= 52; w++) {
     const log = LOG[w]; if (!log) continue;
     W[w - 1].dias.forEach((d, di) => itemsEj(d).forEach(it => {
       const p = log[claveDe(d.id, it)];
       if (!registrado(p) || p.omitido || !p.sets.length || hechoDe(p, it).id !== id) return;
-      out.push({w, d: di + 1, sets: p.sets, max: Math.max(...p.sets.map(x => +x.kg || 0)), com: p.com || ""});
+      out.push({w, d: di + 1, l: `S${w} D${di + 1}`, sets: p.sets, max: Math.max(...p.sets.map(x => +x.kg || 0)), com: p.com || ""});
     }));
   }
   return out;
@@ -2156,7 +2225,7 @@ function abrirHistorial(id, nombre) {
   renderSheet(true);
 }
 function graficoHist(ses, pr) {
-  const pts = ses.slice(-8).map(x => ({l: `S${x.w} D${x.d}`, v: x.max}));
+  const pts = ses.slice(-8).map(x => ({l: x.l, v: x.max}));
   const todos = pts.concat(pr && pr.next ? [{l: "próxima", v: pr.next, prox: true}] : []);
   const vals = todos.map(p => p.v), VW = 360, VH = 170, L = 40, R = 22, T = 12, B = 24;
   const y0 = Math.floor((Math.min(...vals) - 2) / 5) * 5, y1 = Math.max(y0 + 5, Math.ceil((Math.max(...vals) + 2) / 5) * 5);
@@ -2178,7 +2247,7 @@ function histHtml(primera) {
     <div class="sheet-body">
       ${ses.length ? graficoHist(ses, pr) : `<p class="small mut">Todavía no hay series registradas de este ejercicio${conectado() ? "" : " en este teléfono"}.</p>`}
       ${pr ? `<div class="prox"><span class="k">PRÓXIMA</span><span><b class="mono">${kg(pr.next)}</b> · ${esc(pr.motivo)}.</span></div>` : ""}
-      ${ses.length ? `<div class="notas-l">${ses.slice().reverse().map(x => `<div class="nota-i"><span class="k">S${x.w} · D${x.d}</span><span class="mono">${esc(resumen(x.sets))}</span>${x.com ? `<p>“${esc(x.com)}”</p>` : ""}</div>`).join("")}</div>` : ""}
+      ${ses.length ? `<div class="notas-l">${ses.slice().reverse().map(x => `<div class="nota-i"><span class="k">${x.previo ? esc(x.l) + " · Workout Tracker" : `S${x.w} · D${x.d}`}</span><span class="mono">${esc(resumen(x.sets))}</span>${x.com ? `<p>“${esc(x.com)}”</p>` : ""}</div>`).join("")}</div>` : ""}
     </div></div></div>`;
 }
 
@@ -2446,6 +2515,11 @@ document.addEventListener("click", async e => {
   if (ds.open) return abrirRegistro(ui.week, ds.open);
   if (ds.extraOpen) return abrirExtra(ds.extraOpen);
   if (ds.editx) return abrirExtra(ds.editx, Number(ds.i));
+  if (ds.mov && sheet && sheet.tipo === "reg") {
+    sheet.hid = "otro"; sheet.otro = ds.mov; clearTimeout(fijarVariante.t);
+    fijarVariante(); guardarBorrador(); renderSheet();
+    toast(`Hiciste: ${ds.mov}.`); return;
+  }
   if ("deshacer" in ds) { const f = deshacerFn; deshacerFn = null; $("#toast-root").innerHTML = ""; if (f) f(); return; }
   if (ds.mas) { ui.mas = ds.mas; ui.cat.prog = null; saveStore(); render(); return; }
   if (ds.catobj || ds.catdias) { if (ds.catobj) ui.cat.obj = ds.catobj; else ui.cat.dias = ds.catdias; renderMas(); return; }
@@ -2532,7 +2606,7 @@ document.addEventListener("input", e => {
   }
   if ("pnombre" in t.dataset) { ui.partida.nombre = t.value; return; }
   if ("invrepo" in t.dataset) { ui.inv.nuevo = t.value; ui.inv.enlace = ""; return; }
-  if (sheet && "otro" in t.dataset) { sheet.otro = t.value; guardarBorrador(); clearTimeout(fijarVariante.t); fijarVariante.t = setTimeout(() => { if (sheet && sheet.hid === "otro" && (sheet.otro || "").trim()) fijarVariante(); }, 800); return; }
+  if (sheet && "otro" in t.dataset) { sheet.otro = t.value; guardarBorrador(); { const l = $("#mov-lista"); if (l) l.innerHTML = movListaHtml(); } clearTimeout(fijarVariante.t); fijarVariante.t = setTimeout(() => { if (sheet && sheet.hid === "otro" && (sheet.otro || "").trim()) fijarVariante(); }, 800); return; }
   if (sheet && "com" in t.dataset) { sheet.com = t.value; guardarBorrador(); return; }
   if (sheet && "xn" in t.dataset) { sheet.nombre = t.value; guardarBorrador(); return; }
   if (t.dataset.dn) {
@@ -2615,6 +2689,18 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("pagehide", alSalir);
 window.addEventListener("popstate", () => { if (visor) cerrarVisor(true); else if (sheet) cerrarSheet(true); else if (ui.cat.prog) cerrarFicha(); });
 
+/* Si ya anotaste series en una semana posterior a la actual (antes de la 3.1 la semana no avanzaba sola),
+   esa pasa a ser la actual. No cambia nada de lo anotado. */
+function alinearSemana() {
+  const ws = Object.keys(LOG).map(Number).filter(w => w > st.actual && w <= 52 && !esPlantilla(w) &&
+    Object.entries(LOG[w] || {}).some(([k, e]) => !k.includes("~") && registrado(e) && !e.omitido));
+  if (!ws.length) return false;
+  const w = Math.max(...ws);
+  registrar("semana", `S${st.actual} → S${w} al abrir (ya tenías series en la S${w})`);
+  st.actual = w; dirty.estado = marca(); saveStore();
+  return true;
+}
+
 /* ── inicio ── */
 (async function inicio() {
   aplicarTema();
@@ -2629,6 +2715,7 @@ window.addEventListener("popstate", () => { if (visor) cerrarVisor(true); else i
   }
   BASE = DATA.semanas; G = DATA.grupos; P64 = DATA.p64;
   aplicarPlan();  // con un programa del catálogo, sus semanas desde la que elegiste
+  if (alinearSemana()) ui.week = st.actual;
   ui.week = Math.max(1, Math.min(52, ui.week || st.actual));
   if (ui.week === st.actual) autoDia();
   const conHoja = restaurarBorrador();

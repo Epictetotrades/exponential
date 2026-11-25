@@ -519,3 +519,18 @@ body.con-dock .toast { bottom: calc(var(--nav-h) + var(--dock-h) + var(--safe-b)
 /* la vez anterior, en la tarjeta abierta: mismo tamaño que el plan, más suave */
 .tarjeta .kv .v.antes, .kv .v.antes { color: var(--mut); }
 .vuelta.corta { border-left: 0; padding: 0; background: none; margin-top: 6px; font-size: 14px; color: var(--acc); }
+
+/* lista de movimientos en «Hiciste › Otro…» */
+.mov-lista { margin-top: 10px; max-height: 46vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.mov-g .k { display: block; font-size: 11px; letter-spacing: .12em; color: var(--mut); margin-bottom: 6px; }
+.mov-g summary { font-size: 15px; padding: 6px 0; cursor: pointer; color: var(--tx); }
+.mov-g .scs { margin-top: 4px; }
+.sc.mov { font-family: var(--sans); font-size: 14px; }
+.sc.mov.sel { border-color: var(--acc); color: var(--acc); }
+
+/* Año › Tus ejercicios */
+.ejs { display: flex; flex-direction: column; }
+.ej-r { display: flex; flex-direction: column; gap: 3px; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--line); padding: 12px 0; color: var(--tx); font: inherit; cursor: pointer; }
+.ej-n { font-size: 16px; font-weight: 600; }
+.ej-d { font-family: var(--mono); font-size: 13.5px; color: var(--tx2); }
+.ej-d .k { font-size: 11px; letter-spacing: .08em; color: var(--mut); margin-right: 4px; }
